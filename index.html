@@ -26,6 +26,7 @@
   th { color:var(--muted); font-weight:500; } .win, td.best { color:var(--win); font-weight:600; } .loss { color:var(--loss); }
   .bar { display:inline-block; height:8px; border-radius:4px; background:var(--accent); vertical-align:middle; }
   svg.chart { width:100%; height:auto; background:var(--card); border:1px solid var(--line); border-radius:10px; }
+  .pt { fill:transparent; } .pt:hover { fill:var(--accent); }
   .legend { color:var(--muted); font-size:13px; margin:6px 0 0; }
   [hidden] { display:none !important; }
 </style>
@@ -34,8 +35,8 @@
 <main>
   <h1><span>FACEIT</span> Stats</h1>
   <form id="form">
-    <input id="a" placeholder="https://www.faceit.com/en/players/Nickname" autocomplete="off" required>
-    <input id="b" placeholder="Compare with (optional second link)" autocomplete="off">
+    <input id="a" placeholder="Nickname or profile link" autocomplete="off" required>
+    <input id="b" placeholder="Compare with (nickname or link, optional)" autocomplete="off">
     <select id="range">
       <option value="20">Last 20</option><option value="50">Last 50</option>
       <option value="100">Last 100</option><option value="0" selected>All matches</option>
@@ -82,20 +83,28 @@ $('range').addEventListener('change', () => D.length && render());
 
 function slice(p) { const n = +$('range').value || p.matches.length; return p.matches.slice(0, n); }
 
-function chart(ms) {
+function chart(ms, shared) {
   const pts = ms.slice(0, 100).reverse();          // від старішого до новішого
   if (pts.length < 3) return '';
-  const W = 800, H = 180, P = 24, max = Math.max(10, ...pts.map(m => m.kills));
-  const x = i => P + i * (W - 2 * P) / (pts.length - 1), y = v => H - P - v / max * (H - 2 * P);
+  const W = 800, H = 200, L = 36, R = 12, T = 16, B = 28;
+  const max = shared || Math.max(10, ...pts.map(m => m.kills));
+  const x = i => L + i * (W - L - R) / (pts.length - 1), y = v => H - B - v / max * (H - T - B);
+  const day = m => m.finished ? new Date(m.finished).toLocaleDateString() : '';
+  const grid = [0, .5, 1].map(f => { const v = Math.round(max * f);
+    return `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" stroke="var(--line)"/><text x="${L - 6}" y="${y(v) + 4}" fill="var(--muted)" font-size="11" text-anchor="end">${v}</text>`; }).join('');
   const raw = pts.map((m, i) => x(i) + ',' + y(m.kills)).join(' ');
   const ma = pts.map((_, i) => { const w = pts.slice(Math.max(0, i - 9), i + 1); return x(i) + ',' + y(w.reduce((a, m) => a + m.kills, 0) / w.length); }).join(' ');
+  const dots = pts.map((m, i) => `<circle class="pt" cx="${x(i)}" cy="${y(m.kills)}" r="6"><title>${esc([day(m), m.map, m.kills + '/' + m.deaths + '/' + m.assists + ' K/D/A', m.win ? 'WIN' : 'LOSS'].filter(Boolean).join(' · '))}</title></circle>`).join('');
   return `<h3>Form: kills per match (last ${pts.length})</h3>
-  <svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Kills per match chart">
+  <svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Kills per match chart">${grid}
     <polyline points="${raw}" fill="none" stroke="var(--muted)" stroke-width="1" opacity=".6"/>
-    <polyline points="${ma}" fill="none" stroke="var(--accent)" stroke-width="3" stroke-linejoin="round"/>
-    <text x="${P}" y="14" fill="var(--muted)" font-size="11">max ${max}</text>
-  </svg><p class="legend">Grey: each match · Orange: average of last 10 matches</p>`;
+    <polyline points="${ma}" fill="none" stroke="var(--accent)" stroke-width="3" stroke-linejoin="round"/>${dots}
+    <text x="${L}" y="${H - 8}" fill="var(--muted)" font-size="11">${esc(day(pts[0]))}</text>
+    <text x="${W - R}" y="${H - 8}" fill="var(--muted)" font-size="11" text-anchor="end">${esc(day(pts[pts.length - 1]))}</text>
+  </svg><p class="legend">Grey: each match · Orange: average of last 10 · Hover a point for details</p>`;
 }
+
+const peak = p => Math.max(10, ...slice(p).slice(0, 100).map(m => m.kills));
 
 function maps(ms) {
   const by = {};
@@ -105,9 +114,24 @@ function maps(ms) {
     rows.map(([n, s]) => `<tr><td>${esc(n)}</td><td>${s.p}</td><td><span class="bar" style="width:${Math.round(80 * s.p / top)}px"></span></td><td>${f1(100 * s.w / s.p)}%</td><td>${f2(s.d ? s.k / s.d : s.k)}</td></tr>`).join('') + '</table></div>';
 }
 
+// FACEIT не віддає історію ELO по матчах, тому запам'ятовуємо ELO в цьому браузері при кожному перегляді
+function trackElo(p) {
+  if (!p.elo) return '';
+  const key = 'elo:' + p.nickname.toLowerCase();
+  let h = [];
+  try { h = JSON.parse(localStorage.getItem(key)) || []; } catch (e) {}
+  if (!h.length || h[h.length - 1].e !== p.elo) {
+    h.push({ e: p.elo, d: Date.now() });
+    try { localStorage.setItem(key, JSON.stringify(h.slice(-200))); } catch (e) {}
+  }
+  if (h.length < 2) return '';
+  const diff = p.elo - h[0].e;
+  return ' · ' + (diff >= 0 ? '+' : '') + diff + ' ELO since ' + new Date(h[0].d).toLocaleDateString();
+}
+
 function head(p, shown) {
   return `<div class="head">${p.avatar ? `<img src="${esc(p.avatar)}" alt="">` : ''}<div><h2>${esc(p.nickname)}</h2><p>` +
-    [p.level ? 'Level ' + p.level : '', p.elo ? p.elo + ' ELO' : '', shown + ' of ' + p.matches.length + ' matches'].filter(Boolean).join(' · ') + '</p></div></div>';
+    [p.level ? 'Level ' + p.level : '', p.elo ? p.elo + ' ELO' : '', shown + ' of ' + p.matches.length + ' matches'].filter(Boolean).join(' · ') + trackElo(p) + '</p></div></div>';
 }
 
 function render() {
@@ -129,7 +153,7 @@ function single(p) {
 }
 
 function compare(p, q) {
-  const A = st(slice(p)), B = st(slice(q));
+  const A = st(slice(p)), B = st(slice(q)), shared = Math.max(peak(p), peak(q));
   const rows = [['Matches', 'n', 0, x => x], ['Win rate', 'wr', 1, x => f1(x) + '%'], ['K/D', 'kd', 1, f2], ['Avg kills', 'avg', 1, f2],
     ['ADR', 'adr', 1, f1], ['Headshot %', 'hs', 1, x => f1(x) + '%'], ['Kills', 'kills', 0, x => x], ['Deaths', 'deaths', 0, x => x], ['Assists', 'assists', 0, x => x]]
     .filter(([, k]) => A[k] != null || B[k] != null);
@@ -137,7 +161,7 @@ function compare(p, q) {
   return `<div class="cards" style="grid-template-columns:1fr 1fr">${[p, q].map(x => head(x, slice(x).length)).join('')}</div>
     <div class="scroll"><table><tr><th></th><th>${esc(p.nickname)}</th><th>${esc(q.nickname)}</th></tr>` +
     rows.map(([l, k, rank, fmt]) => `<tr><td>${l}</td>${cell(A[k], B[k], rank, fmt)}${cell(B[k], A[k], rank, fmt)}</tr>`).join('') + '</table></div>' +
-    `<h3>${esc(p.nickname)}</h3>${chart(slice(p))}<h3>${esc(q.nickname)}</h3>${chart(slice(q))}`;
+    `<h3>${esc(p.nickname)}</h3>${chart(slice(p), shared)}<h3>${esc(q.nickname)}</h3>${chart(slice(q), shared)}<p class="legend">Both charts use the same scale.</p>`;
 }
 
 function csv(p) {

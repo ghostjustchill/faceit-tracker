@@ -72,7 +72,11 @@ def to_float(value):
 
 def nickname_from_link(link):
     m = re.search(r"/players/([^/?#]+)", link)
-    return urllib.parse.unquote(m.group(1)) if m else None
+    if m:
+        return urllib.parse.unquote(m.group(1))
+    if re.fullmatch(r"[\w.\-]{2,32}", link):      # просто нікнейм
+        return link
+    return None
 
 
 def fetch_player(nickname):
@@ -148,7 +152,7 @@ class Handler(BaseHTTPRequestHandler):
             link = urllib.parse.parse_qs(url.query).get("link", [""])[0].strip()
             nickname = nickname_from_link(link)
             if not nickname:
-                self.send_json(400, {"error": "Paste a link like https://www.faceit.com/en/players/Nickname"})
+                self.send_json(400, {"error": "Enter a nickname or a link like https://www.faceit.com/en/players/Nickname"})
                 return
 
             key = nickname.lower()
