@@ -13,6 +13,8 @@
   form { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px; }
   input, select, button { font:inherit; color:var(--text); background:var(--card); border:1px solid var(--line); border-radius:8px; padding:10px 12px; }
   input { flex:1 1 280px; } button { background:var(--accent); border-color:var(--accent); font-weight:600; cursor:pointer; }
+  .chk { display:flex; align-items:center; gap:6px; color:var(--muted); cursor:pointer; }
+  input[type=checkbox] { flex:none; width:auto; padding:0; accent-color:var(--accent); }
   button:disabled { opacity:.6; cursor:wait; } button.ghost { background:var(--card); border-color:var(--line); font-weight:400; }
   #msg { min-height:24px; color:var(--muted); margin-bottom:8px; } #msg.err { color:var(--loss); }
   .head { display:flex; align-items:center; gap:14px; margin:16px 0; }
@@ -41,6 +43,7 @@
       <option value="20">Last 20</option><option value="50">Last 50</option>
       <option value="100">Last 100</option><option value="0" selected>All matches</option>
     </select>
+    <label class="chk"><input type="checkbox" id="comp"> Competitive maps only</label>
     <button id="go" type="submit">Show stats</button>
   </form>
   <div id="msg"></div>
@@ -80,8 +83,13 @@ $('form').addEventListener('submit', async e => {
   $('go').disabled = false;
 });
 $('range').addEventListener('change', () => D.length && render());
+$('comp').addEventListener('change', () => D.length && render());
 
-function slice(p) { const n = +$('range').value || p.matches.length; return p.matches.slice(0, n); }
+function slice(p) {
+  const all = $('comp').checked ? p.matches.filter(m => /^de_/.test(m.map)) : p.matches;   // тільки змагальні мапи
+  const n = +$('range').value || all.length;
+  return all.slice(0, n);
+}
 
 function chart(ms, shared) {
   const pts = ms.slice(0, 100).reverse();          // від старішого до новішого
@@ -135,7 +143,8 @@ function head(p, shown) {
 }
 
 function render() {
-  if (D.some(p => !p.matches.length)) return msg('No matches found.', true);
+  if (D.some(p => !slice(p).length)) return msg('No matches found with these filters.', true);
+  msg('');
   $('out').innerHTML = D.length === 1 ? single(D[0]) : compare(D[0], D[1]);
   $('out').hidden = false;
   const c = $('csv'); if (c) c.onclick = () => csv(D[0]);
