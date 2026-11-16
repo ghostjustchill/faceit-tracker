@@ -74,6 +74,19 @@
   textarea { font:inherit; color:var(--text); background:var(--card); border:1px solid var(--line); border-radius:8px; padding:10px 12px; width:100%; }
   details.imp { margin:12px 0; background:rgba(26,29,36,.88); border:1px solid var(--line); border-radius:10px; padding:10px 14px; } details.imp summary { cursor:pointer; }
   a { color:#6fb1ff; }
+  .strip { display:flex; gap:3px; margin:8px 0 2px; } .strip i { display:block; width:12px; height:18px; border-radius:3px; background:var(--win); } .strip i.l { background:var(--loss); }
+  .cal { width:100%; height:auto; background:rgba(26,29,36,.88); border:1px solid var(--line); border-radius:10px; }
+  .badges { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; }
+  .bd { background:rgba(26,29,36,.88); border:1px solid var(--line); border-radius:10px; padding:10px 12px; text-align:center; opacity:.45; filter:grayscale(1); }
+  .bd.on { opacity:1; filter:none; border-color:var(--accent); } .bd svg { width:38px; height:38px; color:var(--accent); } .bd b { display:block; } .bd small { display:block; color:var(--muted); } .bd .n { color:var(--accent); font-weight:700; }
+  .chips { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:10px; } .chips:empty { display:none; }
+  .chip { display:inline-flex; border:1px solid var(--line); border-radius:999px; overflow:hidden; background:var(--card); }
+  .chip button { border:0; border-radius:0; background:transparent; padding:4px 10px; font-weight:500; text-transform:none; letter-spacing:0; color:var(--text); }
+  .chip button + button { border-left:1px solid var(--line); color:var(--muted); }
+  .loader { background:rgba(26,29,36,.88); border:1px solid var(--line); border-radius:10px; padding:14px 16px; margin:10px 0 16px; }
+  .lrow { display:flex; align-items:center; gap:10px; margin-bottom:10px; color:var(--muted); } .spin { width:22px; height:22px; color:var(--accent); animation:spin 1.6s linear infinite; }
+  .lbar { height:8px; background:var(--line); border-radius:4px; overflow:hidden; } .lbar i { display:block; height:100%; width:0; background:linear-gradient(90deg,var(--accent),#ffb36b); transition:width .5s ease; }
+  @keyframes spin { to { transform:rotate(360deg); } }
   [hidden] { display:none !important; }
 </style>
 </head>
@@ -102,8 +115,14 @@
     <label class="chk"><input type="checkbox" id="comp"> Competitive maps only</label>
     <button id="go" type="submit">Show stats</button>
     <button class="ghost" id="share" type="button" hidden>Copy share link</button>
+    <button class="ghost" id="fav" type="button" hidden>★ Save</button>
   </form>
+  <div class="chips" id="friends"></div>
   <div id="msg"></div>
+  <div class="loader" id="loader" hidden>
+    <div class="lrow"><svg class="spin" viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><circle cx="16" cy="16" r="9"/><path d="M16 1v8M16 23v8M1 16h8M23 16h8"/></svg><span id="ltxt"></span></div>
+    <div class="lbar"><i id="lfill"></i></div>
+  </div>
   <section id="out" hidden></section>
 </main>
 
@@ -133,10 +152,18 @@ async function load(link) {
 $('form').addEventListener('submit', async e => {
   e.preventDefault();
   const links = [$('a').value.trim(), $('b').value.trim()].filter(Boolean);
-  $('go').disabled = true; $('out').hidden = true;
-  msg('Loading matches, this can take a few seconds…');
-  try { D = await Promise.all(links.map(load)); await Promise.all(D.map(loadElo)); msg(''); render(); }
-  catch (err) { msg(err.message, true); }
+  $('go').disabled = true; $('out').hidden = true; msg('');
+  let pct = 8; setLoad(pct, 'Loading profile and matches…');
+  const creep = setInterval(() => { if (pct < 55) setLoad(pct += 3); }, 700);
+  const wake = setTimeout(() => setLoad(null, 'The free server is waking up, this can take up to a minute…'), 8000);
+  try {
+    D = await Promise.all(links.map(load));
+    clearInterval(creep); setLoad(60, 'Loading ELO history…');
+    await Promise.all(D.map(loadElo));
+    setLoad(100, 'Building your stats…');
+    render();
+  } catch (err) { msg(err.message, true); }
+  clearInterval(creep); clearTimeout(wake); setLoad(0);
   $('go').disabled = false;
 });
 $('range').addEventListener('change', () => D.length && render());
@@ -321,7 +348,7 @@ function head(p, shown) {
   const today = d == null ? '' : `<div class="today"><small>Today</small><b class="${d > 0 ? 'win' : d < 0 ? 'loss' : ''}">${d > 0 ? '+' : ''}${d} ELO</b></div>`;
   const bar = li ? `<div class="lvbar"><i style="width:${li.pct.toFixed(1)}%"></i></div><small class="muted">${li.next ? li.left + ' ELO to level ' + (lv + 1) : 'Max level reached'}</small>` : '';
   return `<div class="head"><div class="av">${p.avatar ? `<img src="${esc(p.avatar)}" alt="">` : ''}${badge(lv, 28)}</div><div class="hinfo"><h2>${esc(p.nickname)}</h2><p>` +
-    ['Level ' + lv, p.elo ? p.elo + ' ELO' : '', shown + ' of ' + p.matches.length + ' matches'].filter(Boolean).join(' · ') + `</p>${bar}</div>${today}</div>`;
+    ['Level ' + lv, p.elo ? p.elo + ' ELO' : '', shown + ' of ' + p.matches.length + ' matches'].filter(Boolean).join(' · ') + `</p>${strip(p)}${bar}</div>${today}</div>`;
 }
 
 function render() {
@@ -336,6 +363,7 @@ function render() {
     $('out').querySelectorAll('.cards .card').forEach((el, i) => el.style.animationDelay = Math.min(i * 40, 500) + 'ms');
   }
   $('share').hidden = false;
+  drawFriends();
 }
 
 // ---------- Рекорди ----------
@@ -544,6 +572,78 @@ function vetoTable(res) {
     '</table></div><p class="legend">Bans are made by the team captain, so your team\'s bans are not always your own.</p>';
 }
 
+// ---------- Смужка форми, календар активності, досягнення ----------
+function strip(p) {
+  const ms = slice(p).slice(0, 20).reverse();            // новіші праворуч
+  return '<div class="strip" aria-label="Last matches">' + ms.map(m => `<i class="${m.win ? '' : 'l'}" title="${esc((m.win ? 'WIN' : 'LOSS') + ' · ' + m.map + ' · ' + m.kills + '/' + m.deaths + '/' + m.assists)}"></i>`).join('') + '</div>';
+}
+
+function calendar(p) {
+  const day = d => d.getFullYear() + '-' + (d.getMonth() + 1) + '-' + d.getDate(), by = {};
+  p.matches.forEach(m => {
+    if (!m.finished) return;
+    const s = by[day(new Date(m.finished))] ||= { n: 0, w: 0, d: 0, hasD: false };
+    s.n++; s.w += m.win; if (m.delta != null) { s.d += m.delta; s.hasD = true; }
+  });
+  const now = new Date(), WEEKS = 26, cell = 14, gap = 3, L = 28, T = 18;
+  const mon = new Date(now.getFullYear(), now.getMonth(), now.getDate() - (now.getDay() + 6) % 7 - (WEEKS - 1) * 7);
+  let cells = '', months = '', lastM = -1;
+  for (let w = 0; w < WEEKS; w++) for (let d = 0; d < 7; d++) {
+    const dt = new Date(mon.getFullYear(), mon.getMonth(), mon.getDate() + w * 7 + d);
+    if (dt > now) continue;
+    const s = by[day(dt)], x = L + w * (cell + gap), y = T + d * (cell + gap);
+    if (d === 0 && dt.getMonth() !== lastM) { lastM = dt.getMonth(); months += `<text x="${x}" y="12" fill="var(--muted)" font-size="10">${dt.toLocaleString('en', { month: 'short' })}</text>`; }
+    const tip = dt.toLocaleDateString() + (s ? `: ${s.n} match${s.n > 1 ? 'es' : ''}, ${s.w} won` + (s.hasD ? ', ' + (s.d > 0 ? '+' : '') + s.d + ' ELO' : '') : ': no matches');
+    cells += `<rect x="${x}" y="${y}" width="${cell}" height="${cell}" rx="3" fill="${s ? 'var(--accent)' : 'var(--line)'}" fill-opacity="${s ? (s.n >= 6 ? 1 : s.n >= 3 ? .65 : .35) : .5}"><title>${esc(tip)}</title></rect>`;
+  }
+  const W = L + WEEKS * (cell + gap), H = T + 7 * (cell + gap);
+  const labels = ['Mon', 'Wed', 'Fri'].map((t, i) => `<text x="0" y="${T + i * 2 * (cell + gap) + 11}" fill="var(--muted)" font-size="9">${t}</text>`).join('');
+  return `<h3>Activity (last ${WEEKS} weeks)</h3><svg class="cal" viewBox="0 0 ${W} ${H}" role="img" aria-label="Activity calendar">${months}${labels}${cells}</svg><p class="legend">Darker = more matches that day · Hover a day for details</p>`;
+}
+
+function badges(p) {
+  const ms = p.matches, sum = k => ms.reduce((a, m) => a + (m[k] || 0), 0);
+  let best = 0, run = 0; ms.slice().reverse().forEach(m => { run = m.win ? run + 1 : 0; best = Math.max(best, run); });
+  const net = p.eloHist && p.eloHist.length ? p.eloHist.reduce((a, x) => a + x.delta, 0) : 0, x = v => '×' + v;
+  const defs = [
+    ['Ace', 'Penta kill in a round', sum('pk'), x], ['Quadro', '4 kills in a round', sum('qk'), x],
+    ['Thirty bomb', '30+ kills in a match', ms.filter(m => m.kills >= 30).length, x], ['Heavy hitter', '100+ ADR in a match', ms.filter(m => m.adr >= 100).length, x],
+    ['Sharpshooter', '70%+ headshots, 10+ kills', ms.filter(m => m.kills >= 10 && m.hs >= 70).length, x], ['Hot streak', '5+ wins in a row', best >= 5 ? best : 0, v => 'best ' + v],
+    ['Veteran', '100+ matches played', ms.length >= 100 ? ms.length : 0, v => v + ' matches'], ['MVP', '7+ MVPs in a match', ms.filter(m => m.mvp >= 7).length, x],
+    ['Climber', '+100 ELO overall', net >= 100 ? net : 0, v => '+' + v + ' ELO'],
+  ];
+  return '<h3>Achievements</h3><div class="badges">' + defs.map(([n, d, v, f]) =>
+    `<div class="bd${v ? ' on' : ''}" title="${esc(d)}"><svg viewBox="0 0 40 40" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="20,3 35,11 35,29 20,37 5,29 5,11"/><path d="M14 20l4 4 8-9"/></svg><b>${n}</b><small>${esc(d)}</small>${v ? `<span class="n">${f(v)}</span>` : '<small>locked</small>'}</div>`).join('') + '</div>';
+}
+
+// ---------- Друзі (зберігаються в цьому браузері) ----------
+const getFriends = () => { try { return JSON.parse(localStorage.getItem('friends')) || []; } catch (e) { return []; } };
+const setFriends = l => { try { localStorage.setItem('friends', JSON.stringify(l.slice(0, 20))); } catch (e) {} drawFriends(); };
+function drawFriends() {
+  const l = getFriends(), t = D.length ? D[D.length - 1].nickname : '';
+  $('friends').innerHTML = l.map(n => `<span class="chip"><button type="button" data-v="${esc(n)}">${esc(n)}</button><button type="button" data-c="${esc(n)}" title="Compare with the player in the first field">vs</button><button type="button" data-x="${esc(n)}" title="Remove">×</button></span>`).join('');
+  $('fav').hidden = !t || l.some(x => x.toLowerCase() === t.toLowerCase());
+  $('fav').textContent = '★ Save ' + t;
+}
+$('friends').addEventListener('click', e => {
+  const b = e.target.closest && e.target.closest('button'); if (!b) return;
+  if (b.dataset.v) { $('a').value = b.dataset.v; $('b').value = ''; $('form').requestSubmit(); }
+  else if (b.dataset.c) { if ($('a').value.trim()) $('b').value = b.dataset.c; else $('a').value = b.dataset.c; $('form').requestSubmit(); }
+  else if (b.dataset.x) setFriends(getFriends().filter(n => n !== b.dataset.x));
+});
+$('fav').addEventListener('click', () => {
+  const t = D[D.length - 1].nickname, l = getFriends();
+  if (!l.some(n => n.toLowerCase() === t.toLowerCase())) { l.push(t); setFriends(l); }
+});
+
+// ---------- Екран завантаження ----------
+function setLoad(pct, text) {
+  if (pct === 0) { $('loader').hidden = true; return; }
+  $('loader').hidden = false;
+  if (pct != null) $('lfill').style.width = pct + '%';
+  if (text) $('ltxt').textContent = text;
+}
+
 function single(p) {
   const ms = slice(p), s = st(ms), best = Math.max(...ms.map(m => m.kills));
   const dd = ms.filter(m => m.delta != null), net = dd.length ? dd.reduce((a, m) => a + m.delta, 0) : null;
@@ -551,7 +651,7 @@ function single(p) {
     ...(s.adr != null ? [['ADR', f1(s.adr)]] : []), ...(s.hs != null ? [['Headshot %', f1(s.hs) + '%']] : []),
     ['Kills', s.kills], ['Deaths', s.deaths], ['Assists', s.assists], ['Best match', best + ' kills'], ...(net != null ? [['ELO net', (net > 0 ? '+' : '') + net]] : [])];
   return head(p, ms.length) + `<div class="cards">${cards.map(([l, v]) => `<div class="card"><b>${esc(v)}</b><small>${l}</small></div>`).join('')}</div>` +
-    eloBlock(p) + coach(ms) + chart(ms) + records(ms) + winloss(ms) + radar(ms) + maps(ms) + vetoSection() + tableSection() + '<p><button class="ghost" id="csv" type="button">Download CSV</button></p>';
+    eloBlock(p) + coach(ms) + chart(ms) + records(ms) + badges(p) + calendar(p) + winloss(ms) + radar(ms) + maps(ms) + vetoSection() + tableSection() + '<p><button class="ghost" id="csv" type="button">Download CSV</button></p>';
 }
 
 function compare(p, q) {
@@ -573,6 +673,8 @@ function csv(p) {
   a.href = URL.createObjectURL(new Blob([lines.join('\n')], { type: 'text/csv' }));
   a.download = p.nickname + '_matches.csv'; a.click();
 }
+drawFriends();
+
 // ---------- Поширення: посилання відкриває сайт одразу з твоєю статистикою ----------
 $('share').addEventListener('click', async () => {
   const q = new URLSearchParams({ u: D[0].nickname });

@@ -106,6 +106,11 @@ def fetch_player(nickname):
                 "hs": to_float(s.get("Headshots %")),
                 "finished": finished,
                 "id": s.get("Match Id") or it.get("match_id") or "",
+                "dk": to_int(s.get("Double Kills")),
+                "tk": to_int(s.get("Triple Kills")),
+                "qk": to_int(s.get("Quadro Kills")),
+                "pk": to_int(s.get("Penta Kills")),
+                "mvp": to_int(s.get("MVPs")),
             })
             if finished and (not oldest or finished < oldest):
                 oldest = finished
