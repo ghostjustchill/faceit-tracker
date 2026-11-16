@@ -16,6 +16,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -104,6 +105,7 @@ def fetch_player(nickname):
                 "adr": to_float(s.get("ADR")),
                 "hs": to_float(s.get("Headshots %")),
                 "finished": finished,
+                "id": s.get("Match Id") or it.get("match_id") or "",
             })
             if finished and (not oldest or finished < oldest):
                 oldest = finished
@@ -112,12 +114,58 @@ def fetch_player(nickname):
         cursor = oldest - 1
 
     return {
+        "player_id": player["player_id"],
         "nickname": player.get("nickname", nickname),
         "avatar": player.get("avatar", ""),
         "elo": cs2.get("faceit_elo"),
         "level": cs2.get("skill_level"),
         "matches": matches,
     }
+
+
+veto_cache = {}
+
+
+def veto_for(match_id, pid):
+    """Бани/піки мап в одному матчі з точки зору гравця.
+    Склад команд беремо з офіційного API, історію вето з неофіційної адреси democracy."""
+    key = (match_id, pid)
+    if key in veto_cache:
+        return veto_cache[key]
+    try:
+        details = api_get("/matches/" + urllib.parse.quote(match_id))
+        side, leader = None, False
+        for f in ("faction1", "faction2"):
+            team = (details.get("teams") or {}).get(f) or {}
+            if any(p.get("player_id") == pid for p in team.get("roster") or []):
+                side, leader = f, team.get("leader") == pid
+        if not side:
+            raise ApiError(404, "player not found in match roster")
+
+        req = urllib.request.Request(
+            "https://api.faceit.com/democracy/v1/match/%s/history" % urllib.parse.quote(match_id),
+            headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json"},
+        )
+        with urllib.request.urlopen(req, timeout=20) as r:
+            hist = json.load(r)
+
+        out = {"id": match_id, "leader": leader, "myDrop": [], "oppDrop": [], "myPick": [], "oppPick": []}
+        for t in (hist.get("payload") or {}).get("tickets") or []:
+            if t.get("entity_type") != "map":
+                continue
+            for e in t.get("entities") or []:
+                if e.get("random"):                    # автовибір системою, не рішення команди
+                    continue
+                kind = {"drop": "Drop", "pick": "Pick"}.get(e.get("status"))
+                if kind and e.get("guid"):
+                    out[("my" if e.get("selected_by") == side else "opp") + kind].append(e["guid"])
+        if len(veto_cache) < 5000:
+            veto_cache[key] = out
+        return out
+    except ApiError as e:
+        return {"id": match_id, "error": str(e)}
+    except (urllib.error.URLError, ValueError, OSError) as e:
+        return {"id": match_id, "error": "veto data unavailable (%s)" % type(e).__name__}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -146,6 +194,35 @@ class Handler(BaseHTTPRequestHandler):
 
         if url.path == "/":
             self.send_bytes(200, (HERE / "index.html").read_bytes(), "text/html; charset=utf-8")
+            return
+
+        if url.path == "/api/debug":
+            # Тимчасова діагностика: сирі дані останнього матчу (щоб знайти поля на кшталт рейтингу). Потім можна видалити.
+            link = urllib.parse.parse_qs(url.query).get("link", [""])[0].strip()
+            nickname = nickname_from_link(link)
+            if not nickname:
+                self.send_json(400, {"error": "Enter a nickname or profile link"})
+                return
+            try:
+                player = api_get("/players", {"nickname": nickname})
+                data = api_get("/players/%s/games/%s/stats" % (player["player_id"], GAME), {"limit": 1, "offset": 0})
+            except ApiError as e:
+                self.send_json(e.status if e.status in (401, 403, 404, 429) else 502, {"error": str(e)})
+                return
+            items = data.get("items") or [None]
+            self.send_json(200, {"player_id": player["player_id"], "latest_match": items[0]})
+            return
+
+        if url.path == "/api/vetoes":
+            q = urllib.parse.parse_qs(url.query)
+            pid = q.get("pid", [""])[0]
+            ids = [i for i in q.get("ids", [""])[0].split(",") if i][:25]
+            if not re.fullmatch(r"[0-9a-fA-F-]{36}", pid) or not ids or not all(re.fullmatch(r"[0-9A-Za-z-]{10,80}", i) for i in ids):
+                self.send_json(400, {"error": "Bad request"})
+                return
+            with ThreadPoolExecutor(max_workers=4) as pool:
+                results = list(pool.map(lambda i: veto_for(i, pid), ids))
+            self.send_json(200, {"results": results})
             return
 
         if url.path == "/api/stats":

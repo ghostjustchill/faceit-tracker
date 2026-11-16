@@ -57,6 +57,20 @@
     pointer-events:none; display:none; z-index:0; }
   .side.l { left:10px; color:#ff7a33; } .side.r { right:10px; color:#4a9bff; }
   @media (min-width:1180px) { .side { display:block; } }
+  .tools { display:flex; gap:12px; align-items:center; margin-bottom:8px; } .tools input { flex:0 1 300px; } #count { color:var(--muted); font-size:13px; }
+  table.sortable th { cursor:pointer; user-select:none; } table.sortable th:hover { color:var(--text); }
+  .cards.wide { grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); } .card small { display:block; }
+  .head { flex-wrap:wrap; } .av { position:relative; width:56px; height:56px; flex:none; }
+  .av img { width:56px; height:56px; } .av .bdg { position:absolute; right:-10px; bottom:-10px; background:var(--bg); border-radius:50%; line-height:0; }
+  .hinfo { flex:1; min-width:200px; } .lvbar { height:6px; background:var(--line); border-radius:3px; margin:8px 0 3px; overflow:hidden; max-width:360px; }
+  .lvbar i { display:block; height:100%; background:linear-gradient(90deg,var(--accent),#ffb36b); transition:width .8s ease; }
+  .muted { color:var(--muted); } .today { text-align:right; } .today small { color:var(--muted); display:block; } .today b { font-size:22px; }
+  .tip { background:rgba(26,29,36,.88); border:1px solid var(--line); border-left:3px solid var(--muted); border-radius:8px; padding:10px 14px; margin-bottom:8px; }
+  .tip.bad { border-left-color:var(--loss); } .tip.good { border-left-color:var(--win); } .tip.info { border-left-color:#4a9bff; } .tip b { display:block; }
+  .radar { max-width:420px; margin:0 auto; display:block; width:100%; height:auto; }
+  @keyframes rise { from { opacity:0; transform:translateY(14px); } to { opacity:1; transform:none; } }
+  #out > *, .cards .card { animation:rise .55s ease backwards; }
+  @media (prefers-reduced-motion:reduce) { *, *::before, *::after { animation:none !important; transition:none !important; } }
   [hidden] { display:none !important; }
 </style>
 </head>
@@ -84,6 +98,7 @@
     </select>
     <label class="chk"><input type="checkbox" id="comp"> Competitive maps only</label>
     <button id="go" type="submit">Show stats</button>
+    <button class="ghost" id="share" type="button" hidden>Copy share link</button>
   </form>
   <div id="msg"></div>
   <section id="out" hidden></section>
@@ -161,24 +176,57 @@ function maps(ms) {
     rows.map(([n, s]) => `<tr><td>${esc(n)}</td><td>${s.p}</td><td><span class="bar" style="width:${Math.round(80 * s.p / top)}px"></span></td><td>${f1(100 * s.w / s.p)}%</td><td>${f2(s.d ? s.k / s.d : s.k)}</td></tr>`).join('') + '</table></div>';
 }
 
-// FACEIT не віддає історію ELO по матчах, тому запам'ятовуємо ELO в цьому браузері при кожному перегляді
-function trackElo(p) {
-  if (!p.elo) return '';
+// ---------- Рівні FACEIT (мінімальне ELO для рівнів 1..10) ----------
+const LV = [0, 501, 751, 901, 1051, 1201, 1351, 1531, 1751, 2001];
+const LC = ['#9a9a9a', '#3ecf8e', '#3ecf8e', '#ffc400', '#ffc400', '#ffc400', '#ffc400', '#ff8a00', '#ff8a00', '#ff3b2f'];
+function lvlInfo(elo) {
+  let l = 1; LV.forEach((v, i) => { if (elo >= v) l = i + 1; });
+  const next = l < 10 ? LV[l] : null, lo = LV[l - 1];
+  return { l, next, left: next ? next - elo : 0, pct: next ? 100 * (elo - lo) / (next - lo) : 100 };
+}
+const badge = (l, s) => `<svg class="bdg" width="${s}" height="${s}" viewBox="0 0 40 40" aria-label="Level ${l}"><circle cx="20" cy="20" r="17" fill="none" stroke="${LC[l - 1]}" stroke-width="4"/><text x="20" y="${l === 10 ? 25 : 26}" text-anchor="middle" font-size="${l === 10 ? 14 : 17}" font-weight="700" fill="${LC[l - 1]}">${l}</text></svg>`;
+
+// ---------- Трекер ELO (FACEIT не віддає ELO по матчах, тому зберігаємо знімки в цьому браузері) ----------
+function eloHist(p) {
+  if (!p.elo) return [];
   const key = 'elo:' + p.nickname.toLowerCase();
-  let h = [];
-  try { h = JSON.parse(localStorage.getItem(key)) || []; } catch (e) {}
-  if (!h.length || h[h.length - 1].e !== p.elo) {
+  let h = []; try { h = JSON.parse(localStorage.getItem(key)) || []; } catch (e) {}
+  const last = h[h.length - 1], today = new Date().toDateString();
+  if (!last || last.e !== p.elo || new Date(last.d).toDateString() !== today) {
     h.push({ e: p.elo, d: Date.now() });
-    try { localStorage.setItem(key, JSON.stringify(h.slice(-200))); } catch (e) {}
+    try { localStorage.setItem(key, JSON.stringify(h.slice(-300))); } catch (e) {}
   }
-  if (h.length < 2) return '';
-  const diff = p.elo - h[0].e;
-  return ' · ' + (diff >= 0 ? '+' : '') + diff + ' ELO since ' + new Date(h[0].d).toLocaleDateString();
+  return h;
+}
+function eloToday(h, elo) {
+  const today = new Date().toDateString(), before = h.filter(x => new Date(x.d).toDateString() !== today);
+  return elo - (before.length ? before[before.length - 1] : h[0]).e;
+}
+function eloBlock(p) {
+  const h = eloHist(p);
+  if (h.length < 2) return '<h3>ELO tracker</h3><p class="legend">Tracking started. Open the site after your games to see ELO growth here (history is kept in this browser).</p>';
+  const W = 800, H = 160, L = 44, R = 12, T = 14, B = 26;
+  const es = h.map(x => x.e), lo = Math.min(...es), hi = Math.max(...es), span = Math.max(hi - lo, 10);
+  const t0 = h[0].d, dt = Math.max(h[h.length - 1].d - t0, 1);
+  const x = d => L + (d - t0) / dt * (W - L - R), y = e => H - B - (e - lo) / span * (H - T - B);
+  const pts = h.map(q => x(q.d) + ',' + y(q.e)).join(' ');
+  const dots = h.map(q => `<circle class="pt" cx="${x(q.d)}" cy="${y(q.e)}" r="6"><title>${esc(new Date(q.d).toLocaleString() + ' · ' + q.e + ' ELO')}</title></circle>`).join('');
+  const dl = d => new Date(d).toLocaleDateString();
+  return `<h3>ELO tracker (since ${esc(dl(t0))})</h3><svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="ELO history">
+    <text x="${L - 6}" y="${y(hi) + 4}" fill="var(--muted)" font-size="11" text-anchor="end">${hi}</text><text x="${L - 6}" y="${y(lo) + 4}" fill="var(--muted)" font-size="11" text-anchor="end">${lo}</text>
+    <line x1="${L}" x2="${W - R}" y1="${y(hi)}" y2="${y(hi)}" stroke="var(--line)"/><line x1="${L}" x2="${W - R}" y1="${y(lo)}" y2="${y(lo)}" stroke="var(--line)"/>
+    <polyline points="${pts}" fill="none" stroke="var(--accent)" stroke-width="3" stroke-linejoin="round"/>${dots}
+    <text x="${L}" y="${H - 8}" fill="var(--muted)" font-size="11">${esc(dl(t0))}</text><text x="${W - R}" y="${H - 8}" fill="var(--muted)" font-size="11" text-anchor="end">${esc(dl(h[h.length - 1].d))}</text></svg>
+    <p class="legend">Snapshots from your visits: ${h.length} · Hover a point for details</p>`;
 }
 
 function head(p, shown) {
-  return `<div class="head">${p.avatar ? `<img src="${esc(p.avatar)}" alt="">` : ''}<div><h2>${esc(p.nickname)}</h2><p>` +
-    [p.level ? 'Level ' + p.level : '', p.elo ? p.elo + ' ELO' : '', shown + ' of ' + p.matches.length + ' matches'].filter(Boolean).join(' · ') + trackElo(p) + '</p></div></div>';
+  const h = eloHist(p), li = p.elo ? lvlInfo(p.elo) : null, lv = li ? li.l : (+p.level || 1);
+  const d = p.elo ? eloToday(h, p.elo) : null;
+  const today = d == null ? '' : `<div class="today"><small>Today</small><b class="${d > 0 ? 'win' : d < 0 ? 'loss' : ''}">${d > 0 ? '+' : ''}${d} ELO</b></div>`;
+  const bar = li ? `<div class="lvbar"><i style="width:${li.pct.toFixed(1)}%"></i></div><small class="muted">${li.next ? li.left + ' ELO to level ' + (lv + 1) : 'Max level reached'}</small>` : '';
+  return `<div class="head"><div class="av">${p.avatar ? `<img src="${esc(p.avatar)}" alt="">` : ''}${badge(lv, 28)}</div><div class="hinfo"><h2>${esc(p.nickname)}</h2><p>` +
+    ['Level ' + lv, p.elo ? p.elo + ' ELO' : '', shown + ' of ' + p.matches.length + ' matches'].filter(Boolean).join(' · ') + `</p>${bar}</div>${today}</div>`;
 }
 
 function render() {
@@ -187,6 +235,207 @@ function render() {
   $('out').innerHTML = D.length === 1 ? single(D[0]) : compare(D[0], D[1]);
   $('out').hidden = false;
   const c = $('csv'); if (c) c.onclick = () => csv(D[0]);
+  T.q = ''; T.shown = 25; drawTable();
+  if (document.querySelectorAll) {
+    [...$('out').children].forEach((el, i) => el.style.animationDelay = Math.min(i * 60, 600) + 'ms');
+    $('out').querySelectorAll('.cards .card').forEach((el, i) => el.style.animationDelay = Math.min(i * 40, 500) + 'ms');
+  }
+  $('share').hidden = false;
+}
+
+// ---------- Рекорди ----------
+function records(ms) {
+  const c = ms.slice().reverse();                     // від старішого до новішого
+  let w = 0, l = 0, bw = 0, bl = 0;
+  for (const m of c) { if (m.win) { w++; l = 0; bw = Math.max(bw, w); } else { l++; w = 0; bl = Math.max(bl, l); } }
+  let cur = 0; for (const m of ms) { if (m.win === ms[0].win) cur++; else break; }
+  const top = (list, f) => list.reduce((a, m) => f(m) > f(a) ? m : a, list[0]);
+  const kdm = m => m.deaths ? m.kills / m.deaths : m.kills;
+  const when = m => [m.map, m.finished ? new Date(m.finished).toLocaleDateString() : ''].filter(Boolean).join(' · ');
+  const mk = top(ms, m => m.kills), ma = top(ms, m => m.assists);
+  const pool = ms.filter(m => m.kills >= 10), mkd = top(pool.length ? pool : ms, kdm);
+  const list = [
+    [bw + (bw === 1 ? ' win' : ' wins'), 'Longest win streak', ''],
+    [bl + (bl === 1 ? ' loss' : ' losses'), 'Longest loss streak', ''],
+    [cur + (ms[0].win ? (cur === 1 ? ' win' : ' wins') : (cur === 1 ? ' loss' : ' losses')), 'Current streak', ''],
+    [mk.kills + ' kills', 'Most kills', when(mk)],
+    [f2(kdm(mkd)), 'Best K/D (10+ kills)', mkd.kills + '/' + mkd.deaths + ' · ' + when(mkd)],
+    [ma.assists + ' assists', 'Most assists', when(ma)],
+  ];
+  if (ms.some(m => m.adr > 0)) { const m = top(ms, x => x.adr); list.push([f1(m.adr), 'Highest ADR', when(m)]); }
+  const by = {};
+  for (const m of ms) { const s = by[m.map || '?'] ||= { n: 0, w: 0 }; s.n++; s.w += m.win; }
+  const mp = Object.entries(by).filter(([, s]) => s.n >= 10).map(([n, s]) => [n, 100 * s.w / s.n, s.n]).sort((x, y) => y[1] - x[1]);
+  if (mp.length >= 2) {
+    const b = mp[0], wst = mp[mp.length - 1];
+    list.push([f1(b[1]) + '%', 'Best map (10+ matches)', b[0] + ' · ' + b[2] + ' matches']);
+    list.push([f1(wst[1]) + '%', 'Worst map (10+ matches)', wst[0] + ' · ' + wst[2] + ' matches']);
+  }
+  return '<h3>Records</h3><div class="cards wide">' + list.map(([v, l, s]) =>
+    `<div class="card"><b>${esc(v)}</b><small>${esc(l)}</small>${s ? `<small>${esc(s)}</small>` : ''}</div>`).join('') + '</div>';
+}
+
+// ---------- Перемоги vs поразки ----------
+function winloss(ms) {
+  const W = ms.filter(m => m.win), L = ms.filter(m => !m.win);
+  if (!W.length || !L.length) return '';
+  const a = (l, k) => l.reduce((s, m) => s + m[k], 0) / l.length;
+  const av = (l, k) => { const v = l.filter(m => m[k] > 0); return v.length ? v.reduce((s, m) => s + m[k], 0) / v.length : null; };
+  const kd = l => { const d = l.reduce((s, m) => s + m.deaths, 0), k = l.reduce((s, m) => s + m.kills, 0); return d ? k / d : k; };
+  const rows = [['Matches', W.length, L.length], ['Avg kills', f2(a(W, 'kills')), f2(a(L, 'kills'))], ['Avg deaths', f2(a(W, 'deaths')), f2(a(L, 'deaths'))],
+    ['K/D', f2(kd(W)), f2(kd(L))], ['ADR', f1(av(W, 'adr')), f1(av(L, 'adr'))], ['Headshot %', f1(av(W, 'hs')), f1(av(L, 'hs'))]];
+  return '<h3>Wins vs losses</h3><div class="scroll"><table><tr><th></th><th>In wins</th><th>In losses</th></tr>' +
+    rows.map(r => `<tr><td>${r[0]}</td><td>${r[1]}</td><td>${r[2]}</td></tr>`).join('') + '</table></div>';
+}
+
+// ---------- Повна таблиця матчів: пошук, сортування, "показати ще" ----------
+const T = { k: 'finished', dir: -1, q: '', shown: 25 };
+
+function tableSection() {
+  return '<h3>All matches</h3><div class="tools"><input id="q" placeholder="Filter by map, e.g. mirage" autocomplete="off"><span id="count"></span></div>' +
+    '<div class="scroll" id="tbl"></div><p><button class="ghost" id="more" type="button">Show more</button></p>';
+}
+
+function drawTable() {
+  const box = $('tbl'); if (!box) return;
+  let rows = slice(D[0]).map(m => ({ ...m, kd: m.deaths ? m.kills / m.deaths : m.kills }));
+  if (T.q) rows = rows.filter(m => (m.map || '').toLowerCase().includes(T.q));
+  const k = T.k;
+  rows.sort((a, b) => (typeof a[k] === 'string' ? a[k].localeCompare(b[k]) : (+a[k]) - (+b[k])) * T.dir);
+  const cols = [['finished', 'Date'], ['map', 'Map'], ['win', 'Result'], ['kills', 'K'], ['deaths', 'D'], ['assists', 'A'], ['kd', 'K/D'], ['adr', 'ADR'], ['hs', 'HS%']];
+  const arrow = c => c === k ? (T.dir > 0 ? ' ▲' : ' ▼') : '';
+  const date = m => m.finished ? new Date(m.finished).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' }) : '–';
+  const body = rows.slice(0, T.shown).map(m => `<tr><td>${esc(date(m))}</td><td>${esc(m.map)}</td><td class="${m.win ? 'win' : 'loss'}">${m.win ? 'WIN' : 'LOSS'}</td>` +
+    `<td>${m.kills}</td><td>${m.deaths}</td><td>${m.assists}</td><td>${f2(m.kd)}</td><td>${m.adr ? f1(m.adr) : '–'}</td><td>${m.hs ? f1(m.hs) : '–'}</td></tr>`).join('');
+  box.innerHTML = `<table class="sortable"><tr>${cols.map(([c, l]) => `<th data-k="${c}">${l}${arrow(c)}</th>`).join('')}</tr>${body}</table>`;
+  $('count').textContent = 'Showing ' + Math.min(T.shown, rows.length) + ' of ' + rows.length;
+  $('more').hidden = rows.length <= T.shown;
+}
+
+$('out').addEventListener('input', e => { if (e.target.id === 'q') { T.q = e.target.value.trim().toLowerCase(); T.shown = 25; drawTable(); } });
+$('out').addEventListener('click', e => {
+  const th = e.target.closest && e.target.closest('th[data-k]');
+  if (th && th.closest('#tbl')) { const k = th.dataset.k; T.dir = T.k === k ? -T.dir : (k === 'map' ? 1 : -1); T.k = k; drawTable(); }
+  if (e.target.id === 'more') { T.shown += 25; drawTable(); }
+  if (e.target.id === 'vgo') runVeto();
+});
+
+// ---------- Радар по картах (матчі і % перемог) ----------
+function radar(ms) {
+  const by = {};
+  for (const m of ms) { const s = by[m.map || '?'] ||= { n: 0, w: 0 }; s.n++; s.w += m.win; }
+  const top = Object.entries(by).sort((a, b) => b[1].n - a[1].n).slice(0, 7);
+  if (top.length < 3) return '';
+  const max = top[0][1].n, C = 190, R = 118, N = top.length, ang = i => -Math.PI / 2 + i * 2 * Math.PI / N;
+  const pt = (i, f) => [C + R * f * Math.cos(ang(i)), C + R * f * Math.sin(ang(i))];
+  const poly = fs => fs.map((f, i) => pt(i, f).map(v => v.toFixed(1)).join(',')).join(' ');
+  const rings = [.25, .5, .75, 1].map(f => `<polygon points="${poly(top.map(() => f))}" fill="none" stroke="var(--line)"/>`).join('');
+  const axes = top.map((_, i) => { const [x, y] = pt(i, 1); return `<line x1="${C}" y1="${C}" x2="${x}" y2="${y}" stroke="var(--line)"/>`; }).join('');
+  const labels = top.map(([n], i) => { const [x, y] = pt(i, 1.2); return `<text x="${x}" y="${y + 4}" text-anchor="middle" fill="var(--muted)" font-size="12">${esc(n.replace(/^de_/, ''))}</text>`; }).join('');
+  const dots = top.map(([n, s], i) => { const [x, y] = pt(i, s.w / s.n); return `<circle class="pt" cx="${x}" cy="${y}" r="7"><title>${esc(n)}: ${s.n} matches · ${f1(100 * s.w / s.n)}% wins</title></circle>`; }).join('');
+  return `<h3>Map activity</h3><svg class="radar" viewBox="0 0 380 380" role="img" aria-label="Map radar">${rings}${axes}
+    <polygon points="${poly(top.map(([, s]) => s.n / max))}" fill="rgba(255,255,255,.12)" stroke="#fff" stroke-width="2"/>
+    <polygon points="${poly(top.map(([, s]) => s.w / s.n))}" fill="rgba(62,207,142,.18)" stroke="var(--win)" stroke-width="2"/>${labels}${dots}</svg>
+    <p class="legend" style="text-align:center">White: matches played (vs your most played map) · Green: win rate (outer ring = 100%)</p>`;
+}
+
+// ---------- Коуч: правила-підказки на основі статистики ----------
+function coach(ms) {
+  if (ms.length < 20) return '<h3>Coach</h3><p class="legend">At least 20 matches are needed for reliable advice.</p>';
+  const s = st(ms), tips = [], add = (tone, title, text) => tips.push({ tone, title, text });
+  const W = ms.filter(m => m.win), L = ms.filter(m => !m.win), c = ms.slice().reverse();
+  const avgD = l => l.reduce((a, m) => a + m.deaths, 0) / l.length;
+
+  if (s.kd < 0.95) add('bad', 'Too many deaths', `You die ${f1(s.deaths / s.n)} times per match with a K/D of ${f2(s.kd)}. Stay closer to teammates so deaths get traded, and avoid dry peeks without utility.`);
+  else if (s.kd >= 1.1) add('good', 'Strong K/D', `K/D ${f2(s.kd)} is a real strength. Convert it into wins by taking more entry duels for your team.`);
+  if (s.adr != null && s.adr < 70) add('bad', 'Low damage per round', `ADR ${f1(s.adr)} is under ~70. Use flashes and smokes to get safer duels, and keep trading damage even when you do not get the kill.`);
+  else if (s.adr != null && s.adr >= 80) add('good', 'High damage output', `ADR ${f1(s.adr)} shows you are consistently active in rounds.`);
+  if (s.hs != null && s.hs < 35) add('bad', 'Crosshair placement', `Headshot rate ${f1(s.hs)}% is low. Keep the crosshair at head level and pre-aim common angles.`);
+  else if (s.hs != null && s.hs >= 50) add('good', 'Good aim', `Headshot rate ${f1(s.hs)}% is solid. Keep warming up before queueing.`);
+
+  const by = {};
+  for (const m of ms) { const x = by[m.map || '?'] ||= { n: 0, w: 0 }; x.n++; x.w += m.win; }
+  const mp = Object.entries(by).filter(([, x]) => x.n >= 10).map(([n, x]) => [n, 100 * x.w / x.n, x.n]).sort((a, b) => a[1] - b[1]);
+  if (mp.length >= 2) {
+    const lo = mp[0], hi = mp[mp.length - 1];
+    if (lo[1] <= s.wr - 8) add('bad', 'Weak map: ' + lo[0], `Only ${f1(lo[1])}% wins over ${lo[2]} matches (overall ${f1(s.wr)}%). Practice it or ban it in the veto.`);
+    if (hi[1] >= s.wr + 8) add('good', 'Strong map: ' + hi[0], `${f1(hi[1])}% wins over ${hi[2]} matches. Pick it more often.`);
+  }
+  if (W.length >= 10 && L.length >= 10 && avgD(L) - avgD(W) >= 3)
+    add('bad', 'You fall apart in lost games', `You die ${f1(avgD(L))} times per loss versus ${f1(avgD(W))} per win. Slow down when behind: play for trades, not hero peeks.`);
+  if (ms.length >= 40) {
+    const r = st(ms.slice(0, 20));
+    if (r.kd - s.kd <= -0.15) add('bad', 'Recent dip', `Last 20 matches: K/D ${f2(r.kd)} versus ${f2(s.kd)} overall. Consider a break or a warm-up routine.`);
+    else if (r.kd - s.kd >= 0.15) add('good', 'You are on the rise', `Last 20 matches: K/D ${f2(r.kd)} versus ${f2(s.kd)} overall.`);
+  }
+  for (const [name, a, b] of [['at night (00-06)', 0, 6], ['in the morning (06-12)', 6, 12], ['in the afternoon (12-18)', 12, 18], ['in the evening (18-24)', 18, 24]]) {
+    const g = ms.filter(m => m.finished && new Date(m.finished).getHours() >= a && new Date(m.finished).getHours() < b);
+    if (g.length >= 20) {
+      const wr = 100 * g.filter(m => m.win).length / g.length;
+      if (wr <= s.wr - 10) add('bad', 'Weaker ' + name, `Win rate ${f1(wr)}% over ${g.length} matches versus ${f1(s.wr)}% overall. Try to queue at other times.`);
+      else if (wr >= s.wr + 10) add('good', 'Best ' + name, `Win rate ${f1(wr)}% over ${g.length} matches. This is your best time to play.`);
+    }
+  }
+  const aL = [], aW = [];
+  for (let i = 1; i < c.length; i++) {
+    if (!c[i].finished || !c[i - 1].finished || c[i].finished - c[i - 1].finished > 3 * 3600 * 1000) continue;   // та сама сесія
+    (c[i - 1].win ? aW : aL).push(c[i]);
+  }
+  if (aL.length >= 15 && aW.length >= 15) {
+    const wl = 100 * aL.filter(m => m.win).length / aL.length, ww = 100 * aW.filter(m => m.win).length / aW.length;
+    if (ww - wl >= 12) add('bad', 'Tilt after a loss', `After a loss you win ${f1(wl)}% of games, after a win ${f1(ww)}%. Take a short break after two losses in a row.`);
+  }
+  tips.sort((a, b) => (a.tone === 'bad' ? 0 : 1) - (b.tone === 'bad' ? 0 : 1));
+  if (!tips.length) add('info', 'Balanced profile', 'No clear weak spots found. Keep playing and check back after more matches.');
+  return '<h3>Coach: what to fix</h3>' + tips.slice(0, 8).map(t => `<div class="tip ${t.tone}"><b>${esc(t.title)}</b>${esc(t.text)}</div>`).join('') +
+    '<p class="legend">Rule-of-thumb advice based on your numbers, not a guarantee.</p>';
+}
+
+// ---------- Бани й піки мап (по періодах, щоб не обробляти все одразу) ----------
+function vetoSection() {
+  const months = [...new Set(D[0].matches.filter(m => m.finished).map(m => new Date(m.finished).toISOString().slice(0, 7)))].sort().reverse();
+  return '<h3>Map veto: bans and picks</h3><div class="tools"><select id="vper"><option value="25">Last 25 matches</option><option value="50">Last 50 matches</option><option value="100">Last 100 matches</option>' +
+    months.map(x => `<option value="${x}">Month ${x}</option>`).join('') +
+    '</select><button class="ghost" id="vgo" type="button">Analyze vetoes</button><span id="vst" class="muted"></span></div><div id="vres"></div>';
+}
+
+async function runVeto() {
+  const p = D[0], v = $('vper').value, st = $('vst');
+  let list = p.matches.filter(m => m.id);
+  if (!list.length) { st.textContent = 'FACEIT data has no match ids for this player.'; return; }
+  list = /^\d+$/.test(v) ? list.slice(0, +v) : list.filter(m => m.finished && new Date(m.finished).toISOString().slice(0, 7) === v);
+  if (!list.length) { st.textContent = 'No matches in this period.'; return; }
+  $('vgo').disabled = true;
+  const res = []; let err = '';
+  for (let i = 0; i < list.length; i += 20) {
+    st.textContent = 'Analyzing ' + Math.min(i + 20, list.length) + ' / ' + list.length + '…';
+    try {
+      const r = await fetch('/api/vetoes?pid=' + encodeURIComponent(p.player_id) + '&ids=' + list.slice(i, i + 20).map(m => m.id).join(','));
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error || 'Request failed');
+      res.push(...j.results);
+    } catch (e) { err = e.message; break; }
+  }
+  $('vgo').disabled = false;
+  st.textContent = err || 'Done: ' + res.length + ' matches';
+  if (res.length) vetoTable(res);
+}
+
+function vetoTable(res) {
+  const ok = res.filter(r => !r.error), bad = res.length - ok.length;
+  if (!ok.length) { $('vres').innerHTML = `<p class="legend">No veto data could be loaded${res[0] ? ' (' + esc(res[0].error) + ')' : ''}.</p>`; return; }
+  const by = {};
+  const bump = (l, k) => (l || []).forEach(g => { (by[g] ||= { myDrop: 0, oppDrop: 0, myPick: 0, oppPick: 0 })[k]++; });
+  ok.forEach(r => { bump(r.myDrop, 'myDrop'); bump(r.oppDrop, 'oppDrop'); bump(r.myPick, 'myPick'); bump(r.oppPick, 'oppPick'); });
+  const rows = Object.entries(by).sort((a, b) => b[1].myDrop - a[1].myDrop);
+  if (!rows.length) { $('vres').innerHTML = '<p class="legend">The veto history was empty for these matches.</p>'; return; }
+  const pct = n => f1(100 * n / ok.length) + '%', caps = ok.filter(r => r.leader).length, top = rows[0];
+  const cell = n => `${n} (${pct(n)})`;
+  $('vres').innerHTML = (top[1].myDrop ? `<p>Your team bans <b>${esc(top[0])}</b> most often: ${cell(top[1].myDrop)}. ` : '<p>') +
+    `You were captain in ${caps} of ${ok.length} matches.${bad ? ' ' + bad + ' matches had no veto data.' : ''}</p>` +
+    '<div class="scroll"><table><tr><th>Map</th><th>Your team bans</th><th>Opponent bans</th><th>Your team picks</th><th>Opponent picks</th></tr>' +
+    rows.map(([n, s]) => `<tr><td>${esc(n)}</td><td>${cell(s.myDrop)}</td><td>${cell(s.oppDrop)}</td><td>${cell(s.myPick)}</td><td>${cell(s.oppPick)}</td></tr>`).join('') +
+    '</table></div><p class="legend">Bans are made by the team captain, so your team\'s bans are not always your own.</p>';
 }
 
 function single(p) {
@@ -194,10 +443,8 @@ function single(p) {
   const cards = [['Matches', s.n], ['Win rate', f1(s.wr) + '%'], ['K/D', f2(s.kd)], ['Avg kills', f2(s.avg)],
     ...(s.adr != null ? [['ADR', f1(s.adr)]] : []), ...(s.hs != null ? [['Headshot %', f1(s.hs) + '%']] : []),
     ['Kills', s.kills], ['Deaths', s.deaths], ['Assists', s.assists], ['Best match', best + ' kills']];
-  const recent = '<h3>Recent matches</h3><div class="scroll"><table><tr><th>Map</th><th>Result</th><th>K</th><th>D</th><th>A</th></tr>' +
-    ms.slice(0, 20).map(m => `<tr><td>${esc(m.map)}</td><td class="${m.win ? 'win' : 'loss'}">${m.win ? 'WIN' : 'LOSS'}</td><td>${m.kills}</td><td>${m.deaths}</td><td>${m.assists}</td></tr>`).join('') + '</table></div>';
   return head(p, ms.length) + `<div class="cards">${cards.map(([l, v]) => `<div class="card"><b>${esc(v)}</b><small>${l}</small></div>`).join('')}</div>` +
-    chart(ms) + maps(ms) + recent + '<p><button class="ghost" id="csv" type="button">Download CSV</button></p>';
+    eloBlock(p) + coach(ms) + chart(ms) + records(ms) + winloss(ms) + radar(ms) + maps(ms) + vetoSection() + tableSection() + '<p><button class="ghost" id="csv" type="button">Download CSV</button></p>';
 }
 
 function compare(p, q) {
@@ -218,6 +465,24 @@ function csv(p) {
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([lines.join('\n')], { type: 'text/csv' }));
   a.download = p.nickname + '_matches.csv'; a.click();
+}
+// ---------- Поширення: посилання відкриває сайт одразу з твоєю статистикою ----------
+$('share').addEventListener('click', async () => {
+  const q = new URLSearchParams({ u: D[0].nickname });
+  if (D[1]) q.set('vs', D[1].nickname);
+  if ($('range').value !== '0') q.set('r', $('range').value);
+  if ($('comp').checked) q.set('c', '1');
+  const url = location.origin + location.pathname + '?' + q;
+  try { await navigator.clipboard.writeText(url); msg('Link copied: ' + url); } catch (e) { prompt('Copy this link:', url); }
+});
+if (typeof location !== 'undefined' && location.search) {
+  const q = new URLSearchParams(location.search);
+  if (q.get('u')) {
+    $('a').value = q.get('u'); $('b').value = q.get('vs') || '';
+    if (['20', '50', '100'].includes(q.get('r'))) $('range').value = q.get('r');
+    $('comp').checked = q.get('c') === '1';
+    $('form').requestSubmit();
+  }
 }
 </script>
 </body>
