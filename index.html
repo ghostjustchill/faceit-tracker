@@ -280,19 +280,19 @@ const eloDay = p => p.eloHist.filter(x => new Date(x.date).toDateString() === ne
 
 function eloMain(p) {
   if (!p.eloHist || p.eloHist.length < 2) return eloLocal(p) + (p.eloErr ? `<p class="legend">FACEIT ELO history unavailable: ${esc(p.eloErr)}</p>` : '');
-  const pts = p.eloHist.slice(0, 100).reverse();                 // від старішого до новішого
+  const n = +$('range').value || p.eloHist.length, pts = p.eloHist.slice(0, n).reverse();   // від старішого до новішого, діапазон як у селекторі
   const W = 800, H = 190, L = 44, R = 12, T = 14, B = 28;
   const es = pts.map(x => x.elo), lo = Math.min(...es) - 10, hi = Math.max(...es) + 10;
   const x = i => L + i * (W - L - R) / (pts.length - 1), y = e => H - B - (e - lo) / (hi - lo) * (H - T - B);
   const line = pts.map((q, i) => x(i) + ',' + y(q.elo)).join(' ');
   const lv = LV.filter(v => v > lo && v < hi).map(v => `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" stroke="var(--line)" stroke-dasharray="4 4"/><text x="${L - 6}" y="${y(v) + 4}" fill="var(--muted)" font-size="11" text-anchor="end">${v}</text>`).join('');
-  const dots = pts.map((q, i) => `<circle class="pt" cx="${x(i)}" cy="${y(q.elo)}" r="6"><title>${esc(new Date(q.date).toLocaleDateString() + ' · ' + q.map + ' · ' + q.elo + ' ELO (' + (q.delta > 0 ? '+' : '') + q.delta + ')')}</title></circle>`).join('');
-  const net = pts.reduce((a, q) => a + q.delta, 0), day = q => new Date(q.date).toLocaleDateString();
+  const dots = pts.map((q, i) => `<circle class="pt" cx="${x(i)}" cy="${y(q.elo)}" r="${pts.length > 150 ? 3 : 6}"><title>${esc(new Date(q.date).toLocaleDateString() + ' · ' + q.map + ' · ' + q.elo + ' ELO (' + (q.delta > 0 ? '+' : '') + q.delta + ')')}</title></circle>`).join('');
+  const net = pts.reduce((a, q) => a + q.delta, 0), day = q => new Date(q.date).toLocaleDateString(), peak = Math.max(...es), low = Math.min(...es);
   return `<h3>ELO history (last ${pts.length} matches, from FACEIT)</h3><svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="ELO history">${lv}
     <text x="${L - 6}" y="${y(Math.max(...es)) + 4}" fill="var(--muted)" font-size="11" text-anchor="end">${Math.max(...es)}</text>
     <polyline points="${line}" fill="none" stroke="var(--accent)" stroke-width="3" stroke-linejoin="round"/>${dots}
     <text x="${L}" y="${H - 8}" fill="var(--muted)" font-size="11">${esc(day(pts[0]))}</text><text x="${W - R}" y="${H - 8}" fill="var(--muted)" font-size="11" text-anchor="end">${esc(day(pts[pts.length - 1]))}</text></svg>
-    <p class="legend">Net change over this period: <b class="${net >= 0 ? 'win' : 'loss'}">${net > 0 ? '+' : ''}${net} ELO</b> · Dashed lines: level boundaries · Hover a point for details</p>`;
+    <p class="legend">Net change over this period: <b class="${net >= 0 ? 'win' : 'loss'}">${net > 0 ? '+' : ''}${net} ELO</b> · Peak <b>${peak}</b> · Lowest <b>${low}</b> · Dashed lines: level boundaries · Hover a point for details</p>`;
 }
 
 function eloBlock(p) { return eloMain(p) + (p.eloErr ? eloImportPanel(p) : ''); }
