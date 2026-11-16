@@ -267,8 +267,8 @@ function eloImportPanel(p) {
   const n = savedElo(p.player_id).length;
   return `<details class="imp"${n ? '' : ' open'}><summary>Import ELO history manually${n ? ' (' + n + ' matches saved in this browser)' : ''}</summary>
     <p class="legend">FACEIT blocks automatic loading from the server, but it opens in your own browser:</p>
-    <ol class="legend"><li>Open <a href="${base}?size=1000&page=0" target="_blank" rel="noopener">this link</a> (if it shows an error, try <a href="${base}" target="_blank" rel="noopener">this one</a>).</li>
-    <li>Select all text (Ctrl+A) and copy it.</li><li>Paste it below and press Import. The history is saved in this browser and grows each time you import.</li></ol>
+    <ol class="legend"><li>Open a page of history (each holds up to 100 matches, newest first): ${[0, 1, 2, 3, 4, 5].map(i => `<a href="${base}?size=100&page=${i}" target="_blank" rel="noopener">page ${i + 1}</a>`).join(' · ')}. If a link shows an error, try <a href="${base}" target="_blank" rel="noopener">this one</a>.</li>
+    <li>Select all text (Ctrl+A) and copy it.</li><li>Paste it below and press Import. Repeat for the next page: the history is saved in this browser and grows with every import.</li></ol>
     <textarea id="eimp" rows="4" placeholder="Paste the copied text here"></textarea>
     <p><button class="ghost" id="eimpgo" type="button">Import</button> <span id="eimpst" class="muted"></span></p></details>`;
 }
