@@ -202,21 +202,50 @@ function eloToday(h, elo) {
   const today = new Date().toDateString(), before = h.filter(x => new Date(x.d).toDateString() !== today);
   return elo - (before.length ? before[before.length - 1] : h[0]).e;
 }
+// Запасний варіант: якщо сервер не отримав історію ELO, пробуємо напряму з браузера (спрацює, лише якщо FACEIT дозволяє)
+async function browserElo(pid) {
+  const base = 'https://api.faceit.com/stats/v1/stats/time/users/' + pid + '/games/cs2';
+  for (const size of [100, 50, 20, null]) {
+    try {
+      const out = []; const seen = new Set();
+      for (let page = 0; page < 15; page++) {
+        const r = await fetch(size ? `${base}?size=${size}&page=${page}` : base);
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const items = await r.json();
+        let fresh = 0;
+        for (const it of items) {
+          if (!it.matchId || seen.has(it.matchId) || it.elo == null || it.elo === '') continue;
+          seen.add(it.matchId); fresh++;
+          out.push({ id: it.matchId, date: +it.date || 0, elo: +it.elo || 0, delta: +it.elo_delta || 0, map: it.i1 || '' });
+        }
+        if (!size || !fresh || items.length < size) break;
+      }
+      if (out.length) return out.sort((a, b) => b.date - a.date);
+    } catch (e) { /* пробуємо наступний варіант */ }
+  }
+  throw new Error('browser request blocked');
+}
+
 async function loadElo(p) {
   if (p.eloHist !== undefined) return;
   p.eloHist = [];
+  let items;
   try {
     const r = await fetch('/api/elo?pid=' + encodeURIComponent(p.player_id)), j = await r.json();
     if (!r.ok) throw new Error(j.error || 'ELO request failed');
-    p.eloHist = j.items;
-    const by = new Map(j.items.map(x => [x.id, x]));
-    p.matches.forEach(m => { const e = by.get(m.id); if (e) { m.delta = e.delta; m.elo = e.elo; } });
-  } catch (e) { p.eloErr = e.message; }
+    items = j.items;
+  } catch (e) {
+    p.eloErr = e.message;
+    try { items = await browserElo(p.player_id); p.eloErr = ''; } catch (e2) { p.eloErr += '; ' + e2.message; return; }
+  }
+  p.eloHist = items;
+  const by = new Map(items.map(x => [x.id, x]));
+  p.matches.forEach(m => { const e = by.get(m.id); if (e) { m.delta = e.delta; m.elo = e.elo; } });
 }
 const eloDay = p => p.eloHist.filter(x => new Date(x.date).toDateString() === new Date().toDateString()).reduce((a, x) => a + x.delta, 0);
 
 function eloBlock(p) {
-  if (!p.eloHist || p.eloHist.length < 2) return eloLocal(p);
+  if (!p.eloHist || p.eloHist.length < 2) return eloLocal(p) + (p.eloErr ? `<p class="legend">FACEIT ELO history unavailable: ${esc(p.eloErr)}</p>` : '');
   const pts = p.eloHist.slice(0, 100).reverse();                 // від старішого до новішого
   const W = 800, H = 190, L = 44, R = 12, T = 14, B = 28;
   const es = pts.map(x => x.elo), lo = Math.min(...es) - 10, hi = Math.max(...es) + 10;

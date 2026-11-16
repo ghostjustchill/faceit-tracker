@@ -171,37 +171,56 @@ def veto_for(match_id, pid):
 elo_cache = {}
 
 
+def elo_page(pid, size, page):
+    """Одна сторінка історії. size=None означає запит без параметрів (як у браузері)."""
+    qs = "" if size is None else "?size=%d&page=%d" % (size, page)
+    req = urllib.request.Request(
+        "https://api.faceit.com/stats/v1/stats/time/users/%s/games/%s%s" % (pid, GAME, qs),
+        headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json"},
+    )
+    with urllib.request.urlopen(req, timeout=20) as r:
+        data = json.load(r)
+    return data if isinstance(data, list) else []
+
+
 def fetch_elo(pid):
     """ELO після кожного матчу та його зміна. Неофіційна адреса FACEIT (без ключа), може змінитись."""
     hit = elo_cache.get(pid)
     if hit and time.time() - hit[0] < CACHE_SECONDS:
         return hit[1]
-    seen, out = set(), []
-    for page in range(MAX_PAGES):
-        req = urllib.request.Request(
-            "https://api.faceit.com/stats/v1/stats/time/users/%s/games/%s?size=100&page=%d" % (pid, GAME, page),
-            headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json"},
-        )
+
+    # Не знаємо, які size/page приймає адреса, тому пробуємо кілька варіантів
+    first, size, last_err = None, None, ""
+    for v in (100, 50, 20, None):
         try:
-            with urllib.request.urlopen(req, timeout=20) as r:
-                items = json.load(r)
+            first, size = elo_page(pid, v, 0), v
+            break
+        except urllib.error.HTTPError as e:
+            last_err = "HTTP %d" % e.code
         except (urllib.error.URLError, ValueError, OSError) as e:
-            if page == 0:
-                raise ApiError(502, "ELO history unavailable (%s)" % type(e).__name__)
+            last_err = type(e).__name__
+    if first is None:
+        raise ApiError(502, "ELO history unavailable (%s)" % last_err)
+
+    seen, out, pages, page = set(), [], [first], 1
+    while size and pages[-1] and len(pages[-1]) >= size and page < MAX_PAGES:
+        try:
+            nxt = elo_page(pid, size, page)
+        except (urllib.error.URLError, ValueError, OSError):
             break
-        if not isinstance(items, list) or not items:
+        if not nxt or nxt[0].get("matchId") == pages[-1][0].get("matchId"):   # сторінки закінчились або повторюються
             break
-        new = 0
+        pages.append(nxt)
+        page += 1
+
+    for items in pages:
         for it in items:
             mid = it.get("matchId")
             if not mid or mid in seen or it.get("elo") in (None, ""):
                 continue
             seen.add(mid)
-            new += 1
             out.append({"id": mid, "date": to_int(it.get("date")), "elo": to_int(it.get("elo")),
                         "delta": to_int(it.get("elo_delta")), "map": it.get("i1", "")})
-        if new == 0:                      # сторінки закінчились або повторюються
-            break
     out.sort(key=lambda x: x["date"], reverse=True)
     elo_cache[pid] = (time.time(), out)
     return out
