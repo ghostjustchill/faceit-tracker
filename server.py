@@ -251,6 +251,17 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         url = urllib.parse.urlparse(self.path)
 
+        static = {"/robots.txt": ("robots.txt", "text/plain; charset=utf-8"),
+                  "/sitemap.xml": ("sitemap.xml", "application/xml; charset=utf-8"),
+                  "/og.png": ("og.png", "image/png")}
+        if url.path in static:
+            name, ctype = static[url.path]
+            try:
+                self.send_bytes(200, (HERE / name).read_bytes(), ctype)
+            except OSError:
+                self.send_bytes(404, b"Not found", "text/plain")
+            return
+
         if url.path == "/health":
             self.send_bytes(200, b"ok", "text/plain")
             return
