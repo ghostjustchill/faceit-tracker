@@ -264,11 +264,14 @@ async function loadElo(p) {
 
 function eloImportPanel(p) {
   const base = 'https://api.faceit.com/stats/v1/stats/time/users/' + p.player_id + '/games/cs2';
-  const n = savedElo(p.player_id).length;
+  const saved = savedElo(p.player_id), n = saved.length;
+  const oldest = n ? Math.min(...saved.map(x => x.date)) : 0, to = oldest - 1;
+  const a = (u, t) => `<a href="${u}" target="_blank" rel="noopener">${t}</a>`;
+  const older = oldest ? `<li>For older matches (before ${esc(new Date(oldest).toLocaleDateString())}) open ${a(`${base}?size=100&page=0&to=${to}`, 'this link')} or, if it shows an error or the same matches, ${a(`${base}?size=100&page=0&to=${Math.floor(to / 1000)}`, 'this one')}. After importing, the next link moves further back.</li>` : '';
   return `<details class="imp"${n ? '' : ' open'}><summary>Import ELO history manually${n ? ' (' + n + ' matches saved in this browser)' : ''}</summary>
-    <p class="legend">FACEIT blocks automatic loading from the server, but it opens in your own browser:</p>
-    <ol class="legend"><li>Open a page of history (each holds up to 100 matches, newest first): ${[0, 1, 2, 3, 4, 5].map(i => `<a href="${base}?size=100&page=${i}" target="_blank" rel="noopener">page ${i + 1}</a>`).join(' · ')}. If a link shows an error, try <a href="${base}" target="_blank" rel="noopener">this one</a>.</li>
-    <li>Select all text (Ctrl+A) and copy it.</li><li>Paste it below and press Import. Repeat for the next page: the history is saved in this browser and grows with every import.</li></ol>
+    <p class="legend">FACEIT blocks automatic loading from the server, but it opens in your own browser. FACEIT only allows the first 300 matches by page number, older ones need a date filter.</p>
+    <ol class="legend"><li>Open ${[0, 1, 2].map(i => a(`${base}?size=100&page=${i}`, 'page ' + (i + 1))).join(' · ')} (100 matches each, newest first).</li>${older}
+    <li>Select all text (Ctrl+A) and copy it.</li><li>Paste it below and press Import. Repeat for the next link: the history is saved in this browser and grows with every import.</li></ol>
     <textarea id="eimp" rows="4" placeholder="Paste the copied text here"></textarea>
     <p><button class="ghost" id="eimpgo" type="button">Import</button> <span id="eimpst" class="muted"></span></p></details>`;
 }
