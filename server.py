@@ -168,6 +168,45 @@ def veto_for(match_id, pid):
         return {"id": match_id, "error": "veto data unavailable (%s)" % type(e).__name__}
 
 
+elo_cache = {}
+
+
+def fetch_elo(pid):
+    """ELO після кожного матчу та його зміна. Неофіційна адреса FACEIT (без ключа), може змінитись."""
+    hit = elo_cache.get(pid)
+    if hit and time.time() - hit[0] < CACHE_SECONDS:
+        return hit[1]
+    seen, out = set(), []
+    for page in range(MAX_PAGES):
+        req = urllib.request.Request(
+            "https://api.faceit.com/stats/v1/stats/time/users/%s/games/%s?size=100&page=%d" % (pid, GAME, page),
+            headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json"},
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=20) as r:
+                items = json.load(r)
+        except (urllib.error.URLError, ValueError, OSError) as e:
+            if page == 0:
+                raise ApiError(502, "ELO history unavailable (%s)" % type(e).__name__)
+            break
+        if not isinstance(items, list) or not items:
+            break
+        new = 0
+        for it in items:
+            mid = it.get("matchId")
+            if not mid or mid in seen or it.get("elo") in (None, ""):
+                continue
+            seen.add(mid)
+            new += 1
+            out.append({"id": mid, "date": to_int(it.get("date")), "elo": to_int(it.get("elo")),
+                        "delta": to_int(it.get("elo_delta")), "map": it.get("i1", "")})
+        if new == 0:                      # сторінки закінчились або повторюються
+            break
+    out.sort(key=lambda x: x["date"], reverse=True)
+    elo_cache[pid] = (time.time(), out)
+    return out
+
+
 class Handler(BaseHTTPRequestHandler):
     def send_bytes(self, status, body, ctype):
         self.send_response(status)
@@ -211,6 +250,17 @@ class Handler(BaseHTTPRequestHandler):
                 return
             items = data.get("items") or [None]
             self.send_json(200, {"player_id": player["player_id"], "latest_match": items[0]})
+            return
+
+        if url.path == "/api/elo":
+            pid = urllib.parse.parse_qs(url.query).get("pid", [""])[0]
+            if not re.fullmatch(r"[0-9a-fA-F-]{36}", pid):
+                self.send_json(400, {"error": "Bad request"})
+                return
+            try:
+                self.send_json(200, {"items": fetch_elo(pid)})
+            except ApiError as e:
+                self.send_json(502, {"error": str(e)})
             return
 
         if url.path == "/api/vetoes":

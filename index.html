@@ -132,7 +132,7 @@ $('form').addEventListener('submit', async e => {
   const links = [$('a').value.trim(), $('b').value.trim()].filter(Boolean);
   $('go').disabled = true; $('out').hidden = true;
   msg('Loading matches, this can take a few seconds…');
-  try { D = await Promise.all(links.map(load)); msg(''); render(); }
+  try { D = await Promise.all(links.map(load)); await Promise.all(D.map(loadElo)); msg(''); render(); }
   catch (err) { msg(err.message, true); }
   $('go').disabled = false;
 });
@@ -202,7 +202,37 @@ function eloToday(h, elo) {
   const today = new Date().toDateString(), before = h.filter(x => new Date(x.d).toDateString() !== today);
   return elo - (before.length ? before[before.length - 1] : h[0]).e;
 }
+async function loadElo(p) {
+  if (p.eloHist !== undefined) return;
+  p.eloHist = [];
+  try {
+    const r = await fetch('/api/elo?pid=' + encodeURIComponent(p.player_id)), j = await r.json();
+    if (!r.ok) throw new Error(j.error || 'ELO request failed');
+    p.eloHist = j.items;
+    const by = new Map(j.items.map(x => [x.id, x]));
+    p.matches.forEach(m => { const e = by.get(m.id); if (e) { m.delta = e.delta; m.elo = e.elo; } });
+  } catch (e) { p.eloErr = e.message; }
+}
+const eloDay = p => p.eloHist.filter(x => new Date(x.date).toDateString() === new Date().toDateString()).reduce((a, x) => a + x.delta, 0);
+
 function eloBlock(p) {
+  if (!p.eloHist || p.eloHist.length < 2) return eloLocal(p);
+  const pts = p.eloHist.slice(0, 100).reverse();                 // від старішого до новішого
+  const W = 800, H = 190, L = 44, R = 12, T = 14, B = 28;
+  const es = pts.map(x => x.elo), lo = Math.min(...es) - 10, hi = Math.max(...es) + 10;
+  const x = i => L + i * (W - L - R) / (pts.length - 1), y = e => H - B - (e - lo) / (hi - lo) * (H - T - B);
+  const line = pts.map((q, i) => x(i) + ',' + y(q.elo)).join(' ');
+  const lv = LV.filter(v => v > lo && v < hi).map(v => `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" stroke="var(--line)" stroke-dasharray="4 4"/><text x="${L - 6}" y="${y(v) + 4}" fill="var(--muted)" font-size="11" text-anchor="end">${v}</text>`).join('');
+  const dots = pts.map((q, i) => `<circle class="pt" cx="${x(i)}" cy="${y(q.elo)}" r="6"><title>${esc(new Date(q.date).toLocaleDateString() + ' · ' + q.map + ' · ' + q.elo + ' ELO (' + (q.delta > 0 ? '+' : '') + q.delta + ')')}</title></circle>`).join('');
+  const net = pts.reduce((a, q) => a + q.delta, 0), day = q => new Date(q.date).toLocaleDateString();
+  return `<h3>ELO history (last ${pts.length} matches, from FACEIT)</h3><svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="ELO history">${lv}
+    <text x="${L - 6}" y="${y(Math.max(...es)) + 4}" fill="var(--muted)" font-size="11" text-anchor="end">${Math.max(...es)}</text>
+    <polyline points="${line}" fill="none" stroke="var(--accent)" stroke-width="3" stroke-linejoin="round"/>${dots}
+    <text x="${L}" y="${H - 8}" fill="var(--muted)" font-size="11">${esc(day(pts[0]))}</text><text x="${W - R}" y="${H - 8}" fill="var(--muted)" font-size="11" text-anchor="end">${esc(day(pts[pts.length - 1]))}</text></svg>
+    <p class="legend">Net change over this period: <b class="${net >= 0 ? 'win' : 'loss'}">${net > 0 ? '+' : ''}${net} ELO</b> · Dashed lines: level boundaries · Hover a point for details</p>`;
+}
+
+function eloLocal(p) {
   const h = eloHist(p);
   if (h.length < 2) return '<h3>ELO tracker</h3><p class="legend">Tracking started. Open the site after your games to see ELO growth here (history is kept in this browser).</p>';
   const W = 800, H = 160, L = 44, R = 12, T = 14, B = 26;
@@ -222,7 +252,7 @@ function eloBlock(p) {
 
 function head(p, shown) {
   const h = eloHist(p), li = p.elo ? lvlInfo(p.elo) : null, lv = li ? li.l : (+p.level || 1);
-  const d = p.elo ? eloToday(h, p.elo) : null;
+  const d = p.eloHist && p.eloHist.length ? eloDay(p) : (p.elo ? eloToday(h, p.elo) : null);
   const today = d == null ? '' : `<div class="today"><small>Today</small><b class="${d > 0 ? 'win' : d < 0 ? 'loss' : ''}">${d > 0 ? '+' : ''}${d} ELO</b></div>`;
   const bar = li ? `<div class="lvbar"><i style="width:${li.pct.toFixed(1)}%"></i></div><small class="muted">${li.next ? li.left + ' ELO to level ' + (lv + 1) : 'Max level reached'}</small>` : '';
   return `<div class="head"><div class="av">${p.avatar ? `<img src="${esc(p.avatar)}" alt="">` : ''}${badge(lv, 28)}</div><div class="hinfo"><h2>${esc(p.nickname)}</h2><p>` +
@@ -262,6 +292,12 @@ function records(ms) {
     [f2(kdm(mkd)), 'Best K/D (10+ kills)', mkd.kills + '/' + mkd.deaths + ' · ' + when(mkd)],
     [ma.assists + ' assists', 'Most assists', when(ma)],
   ];
+  const wd = ms.filter(m => m.delta != null);
+  if (wd.length) {
+    const g = top(wd, m => m.delta), l = top(wd, m => -m.delta);
+    if (g.delta > 0) list.push(['+' + g.delta + ' ELO', 'Biggest ELO gain', when(g)]);
+    if (l.delta < 0) list.push([l.delta + ' ELO', 'Biggest ELO loss', when(l)]);
+  }
   if (ms.some(m => m.adr > 0)) { const m = top(ms, x => x.adr); list.push([f1(m.adr), 'Highest ADR', when(m)]); }
   const by = {};
   for (const m of ms) { const s = by[m.map || '?'] ||= { n: 0, w: 0 }; s.n++; s.w += m.win; }
@@ -301,12 +337,12 @@ function drawTable() {
   let rows = slice(D[0]).map(m => ({ ...m, kd: m.deaths ? m.kills / m.deaths : m.kills }));
   if (T.q) rows = rows.filter(m => (m.map || '').toLowerCase().includes(T.q));
   const k = T.k;
-  rows.sort((a, b) => (typeof a[k] === 'string' ? a[k].localeCompare(b[k]) : (+a[k]) - (+b[k])) * T.dir);
-  const cols = [['finished', 'Date'], ['map', 'Map'], ['win', 'Result'], ['kills', 'K'], ['deaths', 'D'], ['assists', 'A'], ['kd', 'K/D'], ['adr', 'ADR'], ['hs', 'HS%']];
+  rows.sort((a, b) => (typeof a[k] === 'string' ? a[k].localeCompare(b[k]) : ((+a[k]) || 0) - ((+b[k]) || 0)) * T.dir);
+  const cols = [['finished', 'Date'], ['map', 'Map'], ['win', 'Result'], ['kills', 'K'], ['deaths', 'D'], ['assists', 'A'], ['kd', 'K/D'], ['adr', 'ADR'], ['hs', 'HS%'], ['delta', 'ELO']];
   const arrow = c => c === k ? (T.dir > 0 ? ' ▲' : ' ▼') : '';
   const date = m => m.finished ? new Date(m.finished).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' }) : '–';
   const body = rows.slice(0, T.shown).map(m => `<tr><td>${esc(date(m))}</td><td>${esc(m.map)}</td><td class="${m.win ? 'win' : 'loss'}">${m.win ? 'WIN' : 'LOSS'}</td>` +
-    `<td>${m.kills}</td><td>${m.deaths}</td><td>${m.assists}</td><td>${f2(m.kd)}</td><td>${m.adr ? f1(m.adr) : '–'}</td><td>${m.hs ? f1(m.hs) : '–'}</td></tr>`).join('');
+    `<td>${m.kills}</td><td>${m.deaths}</td><td>${m.assists}</td><td>${f2(m.kd)}</td><td>${m.adr ? f1(m.adr) : '–'}</td><td>${m.hs ? f1(m.hs) : '–'}</td><td class="${m.delta > 0 ? 'win' : m.delta < 0 ? 'loss' : ''}">${m.delta == null ? '–' : (m.delta > 0 ? '+' : '') + m.delta}</td></tr>`).join('');
   box.innerHTML = `<table class="sortable"><tr>${cols.map(([c, l]) => `<th data-k="${c}">${l}${arrow(c)}</th>`).join('')}</tr>${body}</table>`;
   $('count').textContent = 'Showing ' + Math.min(T.shown, rows.length) + ' of ' + rows.length;
   $('more').hidden = rows.length <= T.shown;
@@ -440,9 +476,10 @@ function vetoTable(res) {
 
 function single(p) {
   const ms = slice(p), s = st(ms), best = Math.max(...ms.map(m => m.kills));
+  const dd = ms.filter(m => m.delta != null), net = dd.length ? dd.reduce((a, m) => a + m.delta, 0) : null;
   const cards = [['Matches', s.n], ['Win rate', f1(s.wr) + '%'], ['K/D', f2(s.kd)], ['Avg kills', f2(s.avg)],
     ...(s.adr != null ? [['ADR', f1(s.adr)]] : []), ...(s.hs != null ? [['Headshot %', f1(s.hs) + '%']] : []),
-    ['Kills', s.kills], ['Deaths', s.deaths], ['Assists', s.assists], ['Best match', best + ' kills']];
+    ['Kills', s.kills], ['Deaths', s.deaths], ['Assists', s.assists], ['Best match', best + ' kills'], ...(net != null ? [['ELO net', (net > 0 ? '+' : '') + net]] : [])];
   return head(p, ms.length) + `<div class="cards">${cards.map(([l, v]) => `<div class="card"><b>${esc(v)}</b><small>${l}</small></div>`).join('')}</div>` +
     eloBlock(p) + coach(ms) + chart(ms) + records(ms) + winloss(ms) + radar(ms) + maps(ms) + vetoSection() + tableSection() + '<p><button class="ghost" id="csv" type="button">Download CSV</button></p>';
 }
