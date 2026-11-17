@@ -114,6 +114,10 @@
   .feat { display:grid; grid-template-columns:repeat(auto-fit,minmax(250px,1fr)); gap:10px; }
   .ft { background:rgba(26,29,36,.88); border:1px solid var(--line); border-radius:10px; padding:14px 16px; } .ft svg { width:34px; height:34px; color:var(--accent); margin-bottom:6px; } .ft b { display:block; margin-bottom:2px; } .ft small { color:var(--muted); font-size:13px; }
   .ladder { display:grid; grid-template-columns:repeat(auto-fit,minmax(96px,1fr)); gap:8px; } .lv { text-align:center; background:rgba(26,29,36,.88); border:1px solid var(--line); border-radius:10px; padding:8px 4px; } .lv small { display:block; color:var(--muted); font-size:12px; }
+  .top { display:flex; align-items:center; justify-content:space-between; gap:12px; } .top h1 { margin-bottom:20px; } #lang { padding:6px 12px; margin-bottom:20px; }
+  tr.mr { cursor:pointer; } tr.mr:hover td { background:rgba(255,255,255,.05); } tr.md > td { white-space:normal; background:rgba(0,0,0,.18); }
+  .mteams { display:grid; grid-template-columns:1fr 1fr; gap:14px; } @media (max-width:700px) { .mteams { grid-template-columns:1fr; } }
+  .mteams h4 { margin:4px 0 6px; } .mteams td, .mteams th { padding:4px 8px; font-size:13px; } .mteams tr.me td { color:var(--accent); font-weight:700; }
   [hidden] { display:none !important; }
 </style>
 </head>
@@ -131,7 +135,7 @@
   <path d="M10 246h120v34H10z"/><text x="70" y="268" text-anchor="middle" fill="currentColor" stroke="none" font-size="13" letter-spacing="3">CT SIDE</text>
 </svg>
 <main>
-  <h1 id="homebtn" title="Home" style="cursor:pointer"><svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><circle cx="16" cy="16" r="9"/><path d="M16 1v8M16 23v8M1 16h8M23 16h8"/><circle cx="16" cy="16" r="1.5" fill="currentColor"/></svg><span>FACEIT</span> Stats</h1>
+  <div class="top"><h1 id="homebtn" title="Home" style="cursor:pointer"><svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><circle cx="16" cy="16" r="9"/><path d="M16 1v8M16 23v8M1 16h8M23 16h8"/><circle cx="16" cy="16" r="1.5" fill="currentColor"/></svg><span>FACEIT</span> Stats</h1><button class="ghost" id="lang" type="button" title="Language">UA</button></div>
   <form id="form">
     <input id="a" placeholder="Nickname or profile link" autocomplete="off" required>
     <input id="b" placeholder="Compare with (nickname or link, optional)" autocomplete="off">
@@ -139,6 +143,7 @@
       <option value="20">Last 20</option><option value="50">Last 50</option>
       <option value="100">Last 100</option><option value="0" selected>All matches</option>
     </select>
+    <select id="period"><option value="0" selected>All time</option><option value="7">Last 7 days</option><option value="30">Last 30 days</option><option value="90">Last 90 days</option><option value="180">Last 180 days</option></select>
     <label class="chk"><input type="checkbox" id="comp"> Competitive maps only</label>
     <button id="go" type="submit">Show stats</button>
     <button class="ghost" id="share" type="button" hidden>Copy share link</button>
@@ -204,10 +209,13 @@ $('form').addEventListener('submit', async e => {
   $('go').disabled = false;
 });
 $('range').addEventListener('change', () => D.length && render());
+$('period').addEventListener('change', () => D.length && render());
 $('comp').addEventListener('change', () => D.length && render());
 
 function slice(p) {
-  const all = $('comp').checked ? p.matches.filter(m => /^de_/.test(m.map)) : p.matches;   // тільки змагальні мапи
+  let all = $('comp').checked ? p.matches.filter(m => /^de_/.test(m.map)) : p.matches;   // тільки змагальні мапи
+  const days = +$('period').value;
+  if (days) all = all.filter(m => m.finished >= Date.now() - days * 864e5);
   const n = +$('range').value || all.length;
   return all.slice(0, n);
 }
@@ -344,7 +352,9 @@ const eloDay = p => p.eloHist.filter(x => new Date(x.date).toDateString() === ne
 
 function eloMain(p) {
   if (!p.eloHist || p.eloHist.length < 2) return eloLocal(p) + (p.eloErr ? `<p class="legend">FACEIT ELO history unavailable: ${esc(p.eloErr)}</p>` : '');
-  const n = +$('range').value || p.eloHist.length, pts = p.eloHist.slice(0, n).reverse();   // від старішого до новішого, діапазон як у селекторі
+  const days = +$('period').value, src = days ? p.eloHist.filter(x => x.date >= Date.now() - days * 864e5) : p.eloHist;
+  const n = +$('range').value || src.length, pts = src.slice(0, n).reverse();   // від старішого до новішого, діапазон і період як у селекторах
+  if (pts.length < 2) return '<h3>ELO history</h3><p class="legend">Not enough ELO data in this period.</p>';
   const W = 800, H = 190, L = 44, R = 12, T = 14, B = 28;
   const es = pts.map(x => x.elo), lo = Math.min(...es) - 10, hi = Math.max(...es) + 10;
   const x = i => L + i * (W - L - R) / (pts.length - 1), y = e => H - B - (e - lo) / (hi - lo) * (H - T - B);
@@ -385,7 +395,7 @@ function head(p, shown) {
   const today = d == null ? '' : `<div class="today"><small>Today</small><b class="${d > 0 ? 'win' : d < 0 ? 'loss' : ''}">${d > 0 ? '+' : ''}${d} ELO</b></div>`;
   const bar = li ? `<div class="lvbar"><i style="width:${li.pct.toFixed(1)}%"></i></div><small class="muted">${li.next ? li.left + ' ELO to level ' + (lv + 1) : 'Max level reached'}</small>` : '';
   return `<div class="head"><div class="av">${p.avatar ? `<img src="${esc(p.avatar)}" alt="">` : ''}${badge(lv, 28)}</div><div class="hinfo"><h2>${esc(p.nickname)}</h2><p>` +
-    ['Level ' + lv, p.elo ? p.elo + ' ELO' : '', shown + ' of ' + p.matches.length + ' matches'].filter(Boolean).join(' · ') + `</p>${strip(p)}${bar}</div>${today}</div>`;
+    ['Level ' + lv, p.elo ? p.elo + ' ELO' : '', p.rank && p.rank.region ? '#' + p.rank.region + ' ' + p.rank.regionName : '', p.rank && p.rank.country ? '#' + p.rank.country + ' ' + p.rank.countryCode : '', shown + ' of ' + p.matches.length + ' matches'].filter(Boolean).join(' · ') + `</p>${strip(p)}${bar}</div>${today}</div>`;
 }
 
 function render() {
@@ -394,7 +404,8 @@ function render() {
   $('out').innerHTML = D.length === 1 ? single(D[0]) : compare(D[0], D[1]);
   $('out').hidden = false;
   const c = $('csv'); if (c) c.onclick = () => csv(D[0]);
-  T.q = ''; T.shown = 25; drawTable();
+  const cd = $('card'); if (cd) cd.onclick = () => downloadCard(D[0]);
+  T.q = ''; T.shown = 25; T.open = null; drawTable();
   if (document.querySelectorAll) {
     [...$('out').children].forEach((el, i) => el.style.animationDelay = Math.min(i * 60, 600) + 'ms');
     $('out').querySelectorAll('.cards .card').forEach((el, i) => el.style.animationDelay = Math.min(i * 40, 500) + 'ms');
@@ -456,11 +467,32 @@ function winloss(ms) {
 }
 
 // ---------- Повна таблиця матчів: пошук, сортування, "показати ще" ----------
-const T = { k: 'finished', dir: -1, q: '', shown: 25 };
+const T = { k: 'finished', dir: -1, q: '', shown: 25, open: null }, MC = {};
 
 function tableSection() {
   return '<h3>All matches</h3><div class="tools"><input id="q" placeholder="Filter by map, e.g. mirage" autocomplete="off"><span id="count"></span></div>' +
     '<div class="scroll" id="tbl"></div><p><button class="ghost" id="more" type="button">Show more</button></p>';
+}
+
+async function toggleMatch(id) {
+  if (T.open === id) { T.open = null; drawTable(); return; }
+  T.open = id;
+  if (!MC[id] || MC[id].error) {
+    MC[id] = 'loading'; drawTable();
+    try { const r = await fetch('/api/match?id=' + encodeURIComponent(id)), j = await r.json(); MC[id] = r.ok ? j : { error: j.error || 'Request failed' }; }
+    catch (e) { MC[id] = { error: e.message }; }
+  }
+  drawTable();
+}
+function matchRows(id) {
+  const d = MC[id], me = D[0] && D[0].player_id;
+  let body;
+  if (d === 'loading') body = 'Loading match…';
+  else if (!d || d.error) body = esc((d && d.error) || 'No data');
+  else body = `<p class="legend">${esc(d.map)} · ${esc(d.score)}</p><div class="mteams">` + d.teams.map(t =>
+    `<div><h4 class="${t.win ? 'win' : 'loss'}">${esc(t.name)} · ${t.score}</h4><div class="scroll"><table><tr><th>Player</th><th>K</th><th>D</th><th>A</th><th>ADR</th><th>HS%</th></tr>` +
+    t.players.map(p => `<tr class="${p.id === me ? 'me' : ''}"><td>${esc(p.nick)}</td><td>${p.k}</td><td>${p.d}</td><td>${p.a}</td><td>${p.adr ? f1(p.adr) : '–'}</td><td>${p.hs ? f1(p.hs) : '–'}</td></tr>`).join('') + '</table></div></div>').join('') + '</div>';
+  return `<tr class="md"><td colspan="10">${body}</td></tr>`;
 }
 
 function drawTable() {
@@ -472,8 +504,8 @@ function drawTable() {
   const cols = [['finished', 'Date'], ['map', 'Map'], ['win', 'Result'], ['kills', 'K'], ['deaths', 'D'], ['assists', 'A'], ['kd', 'K/D'], ['adr', 'ADR'], ['hs', 'HS%'], ['delta', 'ELO']];
   const arrow = c => c === k ? (T.dir > 0 ? ' ▲' : ' ▼') : '';
   const date = m => m.finished ? new Date(m.finished).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' }) : '–';
-  const body = rows.slice(0, T.shown).map(m => `<tr><td>${esc(date(m))}</td><td>${esc(m.map)}</td><td class="${m.win ? 'win' : 'loss'}">${m.win ? 'WIN' : 'LOSS'}</td>` +
-    `<td>${m.kills}</td><td>${m.deaths}</td><td>${m.assists}</td><td>${f2(m.kd)}</td><td>${m.adr ? f1(m.adr) : '–'}</td><td>${m.hs ? f1(m.hs) : '–'}</td><td class="${m.delta > 0 ? 'win' : m.delta < 0 ? 'loss' : ''}">${m.delta == null ? '–' : (m.delta > 0 ? '+' : '') + m.delta}</td></tr>`).join('');
+  const body = rows.slice(0, T.shown).map(m => `<tr class="mr" data-id="${esc(m.id || '')}" title="Click for match details"><td>${esc(date(m))}</td><td>${esc(m.map)}</td><td class="${m.win ? 'win' : 'loss'}">${m.win ? 'WIN' : 'LOSS'}</td>` +
+    `<td>${m.kills}</td><td>${m.deaths}</td><td>${m.assists}</td><td>${f2(m.kd)}</td><td>${m.adr ? f1(m.adr) : '–'}</td><td>${m.hs ? f1(m.hs) : '–'}</td><td class="${m.delta > 0 ? 'win' : m.delta < 0 ? 'loss' : ''}">${m.delta == null ? '–' : (m.delta > 0 ? '+' : '') + m.delta}</td></tr>` + (m.id && T.open === m.id ? matchRows(m.id) : '')).join('');
   box.innerHTML = `<table class="sortable"><tr>${cols.map(([c, l]) => `<th data-k="${c}">${l}${arrow(c)}</th>`).join('')}</tr>${body}</table>`;
   $('count').textContent = 'Showing ' + Math.min(T.shown, rows.length) + ' of ' + rows.length;
   $('more').hidden = rows.length <= T.shown;
@@ -481,6 +513,8 @@ function drawTable() {
 
 $('out').addEventListener('input', e => { if (e.target.id === 'q') { T.q = e.target.value.trim().toLowerCase(); T.shown = 25; drawTable(); } });
 $('out').addEventListener('click', e => {
+  const mr = e.target.closest && e.target.closest('tr.mr');
+  if (mr && mr.dataset.id && !e.target.closest('tr.md')) toggleMatch(mr.dataset.id);
   const th = e.target.closest && e.target.closest('th[data-k]');
   if (th && th.closest('#tbl')) { const k = th.dataset.k; T.dir = T.k === k ? -T.dir : (k === 'map' ? 1 : -1); T.k = k; drawTable(); }
   if (e.target.id === 'more') { T.shown += 25; drawTable(); }
@@ -603,7 +637,7 @@ function vetoTable(res) {
   if (!rows.length) { $('vres').innerHTML = '<p class="legend">The veto history was empty for these matches.</p>'; return; }
   const pct = n => f1(100 * n / ok.length) + '%', caps = ok.filter(r => r.leader).length, top = rows[0];
   const cell = n => `${n} (${pct(n)})`;
-  $('vres').innerHTML = (top[1].myDrop ? `<p>Your team bans <b>${esc(top[0])}</b> most often: ${cell(top[1].myDrop)}. ` : '<p>') +
+  $('vres').innerHTML = (top[1].myDrop ? `<p>Most banned by your team: <b>${esc(top[0])}</b> (${cell(top[1].myDrop)}). ` : '<p>') +
     `You were captain in ${caps} of ${ok.length} matches.${bad ? ' ' + bad + ' matches had no veto data.' : ''}</p>` +
     '<div class="scroll"><table><tr><th>Map</th><th>Your team bans</th><th>Opponent bans</th><th>Your team picks</th><th>Opponent picks</th></tr>' +
     rows.map(([n, s]) => `<tr><td>${esc(n)}</td><td>${cell(s.myDrop)}</td><td>${cell(s.oppDrop)}</td><td>${cell(s.myPick)}</td><td>${cell(s.oppPick)}</td></tr>`).join('') +
@@ -700,6 +734,41 @@ function drawHome() {
 }
 $('homebtn').addEventListener('click', () => { $('out').hidden = true; $('home').hidden = false; msg(''); drawHome(); window.scrollTo && window.scrollTo(0, 0); });
 
+// ---------- Картка для поширення (PNG малюється в браузері) ----------
+function downloadCard(p) {
+  const ms = slice(p); if (!ms.length) return;
+  const s = st(ms), li = p.elo ? lvlInfo(p.elo) : null, lv = li ? li.l : (+p.level || 1);
+  const c = document.createElement('canvas'); c.width = 1200; c.height = 630;
+  const g = c.getContext('2d'), F = '"Bahnschrift","Segoe UI",system-ui,sans-serif';
+  g.fillStyle = '#0f1115'; g.fillRect(0, 0, 1200, 630);
+  [[0, 0, '255,85,0'], [1200, 630, '70,150,255']].forEach(([x, y, col]) => {
+    const r = g.createRadialGradient(x, y, 0, x, y, 650); r.addColorStop(0, `rgba(${col},.32)`); r.addColorStop(1, `rgba(${col},0)`); g.fillStyle = r; g.fillRect(0, 0, 1200, 630);
+  });
+  g.strokeStyle = 'rgba(255,255,255,.04)'; g.lineWidth = 1;
+  for (let x = 0; x <= 1200; x += 40) { g.beginPath(); g.moveTo(x, 0); g.lineTo(x, 630); g.stroke(); }
+  for (let y = 0; y <= 630; y += 40) { g.beginPath(); g.moveTo(0, y); g.lineTo(1200, y); g.stroke(); }
+  g.fillStyle = '#ff5500'; g.font = `700 26px ${F}`; g.fillText('FACEIT', 60, 70); const w = g.measureText('FACEIT ').width;
+  g.fillStyle = '#e8eaed'; g.fillText('STATS', 60 + w, 70);
+  // рівень
+  const col = LC[lv - 1]; g.strokeStyle = col; g.lineWidth = 8; g.beginPath(); g.arc(120, 190, 52, 0, 7); g.stroke();
+  g.fillStyle = col; g.font = `700 ${lv === 10 ? 44 : 54}px ${F}`; g.textAlign = 'center'; g.fillText(String(lv), 120, lv === 10 ? 206 : 209); g.textAlign = 'left';
+  g.fillStyle = '#e8eaed'; g.font = `700 68px ${F}`; g.fillText(p.nickname, 200, 188);
+  g.fillStyle = '#8b93a1'; g.font = `400 30px ${F}`;
+  g.fillText([p.elo ? p.elo + ' ELO' : '', p.rank && p.rank.country ? '#' + p.rank.country + ' ' + p.rank.countryCode : '', ms.length + ' matches'].filter(Boolean).join('  ·  '), 202, 232);
+  if (li && li.next) { g.fillStyle = '#2a2e38'; g.fillRect(60, 268, 1080, 10); g.fillStyle = '#ff5500'; g.fillRect(60, 268, 1080 * li.pct / 100, 10); g.fillStyle = '#8b93a1'; g.font = `400 22px ${F}`; g.fillText(li.left + ' ELO to level ' + (lv + 1), 60, 306); }
+  // показники
+  const items = [['Win rate', f1(s.wr) + '%'], ['K/D', f2(s.kd)], ['Avg kills', f2(s.avg)], ['ADR', s.adr != null ? f1(s.adr) : '–'], ['Headshot %', s.hs != null ? f1(s.hs) + '%' : '–'], ['Matches', String(s.n)]];
+  items.forEach(([l, v], i) => {
+    const x = 60 + (i % 3) * 366, y = 340 + Math.floor(i / 3) * 120;
+    g.fillStyle = 'rgba(26,29,36,.9)'; g.fillRect(x, y, 348, 104); g.fillStyle = '#ff5500'; g.fillRect(x, y, 5, 104);
+    g.fillStyle = '#e8eaed'; g.font = `700 46px ${F}`; g.fillText(v, x + 24, y + 56); g.fillStyle = '#8b93a1'; g.font = `400 22px ${F}`; g.fillText(l, x + 24, y + 88);
+  });
+  // форма: останні 20 матчів
+  ms.slice(0, 20).reverse().forEach((m, i) => { g.fillStyle = m.win ? '#3ecf8e' : '#ff5c5c'; g.fillRect(900 + i * 12, 40, 9, 30); });
+  g.fillStyle = '#8b93a1'; g.font = `400 20px ${F}`; g.textAlign = 'right'; g.fillText(location.host || '', 1140, 598); g.textAlign = 'left';
+  c.toBlob(b => { const a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = p.nickname + '_faceit_stats.png'; a.click(); });
+}
+
 function single(p) {
   const ms = slice(p), s = st(ms), best = Math.max(...ms.map(m => m.kills));
   const dd = ms.filter(m => m.delta != null), net = dd.length ? dd.reduce((a, m) => a + m.delta, 0) : null;
@@ -707,7 +776,7 @@ function single(p) {
     ...(s.adr != null ? [['ADR', f1(s.adr)]] : []), ...(s.hs != null ? [['Headshot %', f1(s.hs) + '%']] : []),
     ['Kills', s.kills], ['Deaths', s.deaths], ['Assists', s.assists], ['Best match', best + ' kills'], ...(net != null ? [['ELO net', (net > 0 ? '+' : '') + net]] : [])];
   return head(p, ms.length) + `<div class="cards">${cards.map(([l, v]) => `<div class="card"><b>${esc(v)}</b><small>${l}</small></div>`).join('')}</div>` +
-    eloBlock(p) + coach(ms) + chart(ms) + records(ms) + badges(p) + calendar(p) + winloss(ms) + radar(ms) + maps(ms) + vetoSection() + tableSection() + '<p><button class="ghost" id="csv" type="button">Download CSV</button></p>';
+    eloBlock(p) + coach(ms) + chart(ms) + records(ms) + badges(p) + calendar(p) + winloss(ms) + radar(ms) + maps(ms) + vetoSection() + tableSection() + '<p><button class="ghost" id="csv" type="button">Download CSV</button> <button class="ghost" id="card" type="button">Download stats card</button></p>';
 }
 
 function compare(p, q) {
@@ -737,6 +806,7 @@ $('share').addEventListener('click', async () => {
   if (D[1]) q.set('vs', D[1].nickname);
   if ($('range').value !== '0') q.set('r', $('range').value);
   if ($('comp').checked) q.set('c', '1');
+  if ($('period').value !== '0') q.set('d', $('period').value);
   const url = location.origin + location.pathname + '?' + q;
   try { await navigator.clipboard.writeText(url); msg('Link copied: ' + url); } catch (e) { prompt('Copy this link:', url); }
 });
@@ -746,8 +816,93 @@ if (typeof location !== 'undefined' && location.search) {
     $('a').value = q.get('u'); $('b').value = q.get('vs') || '';
     if (['20', '50', '100'].includes(q.get('r'))) $('range').value = q.get('r');
     $('comp').checked = q.get('c') === '1';
+    if (['7', '30', '90', '180'].includes(q.get('d'))) $('period').value = q.get('d');
     $('form').requestSubmit();
   }
+}
+// ---------- Мова: EN / UA (переклад тексту інтерфейсу на льоту) ----------
+const LANG = (() => { let v = null; try { v = localStorage.getItem('lang'); } catch (e) {} return v || (typeof navigator !== 'undefined' && (navigator.language || '').toLowerCase().startsWith('uk') ? 'uk' : 'en'); })();
+const UK = {
+  'Nickname or profile link': 'Нікнейм або посилання на профіль', 'Compare with (nickname or link, optional)': 'Порівняти з (нікнейм або посилання, необов’язково)',
+  'Last 20': 'Останні 20', 'Last 50': 'Останні 50', 'Last 100': 'Останні 100', 'All matches': 'Усі матчі',
+  'All time': 'За весь час', 'Last 7 days': 'Останні 7 днів', 'Last 30 days': 'Останні 30 днів', 'Last 90 days': 'Останні 90 днів', 'Last 180 days': 'Останні 180 днів',
+  'Competitive maps only': 'Лише змагальні мапи', 'Show stats': 'Показати статистику', 'Copy share link': 'Копіювати посилання',
+  'Know your game': 'Знай свою гру', 'Paste a FACEIT nickname or profile link above to see your ELO history, form, map stats, vetoes and coaching tips.': 'Встав нікнейм або посилання на профіль FACEIT угорі, щоб побачити історію ELO, форму, статистику мап, бани й піки та поради тренера.',
+  'Not sure where to start?': 'Не знаєш, з чого почати?', 'Try gh0stik4': 'Спробуй gh0stik4', 'Recently viewed': 'Нещодавно переглянуті', 'What you get': 'Що ти отримуєш', 'FACEIT levels': 'Рівні FACEIT',
+  'ELO tracker': 'Трекер ELO', 'Real ELO history after every match, today\'s gain or loss and progress to the next level.': 'Справжня історія ELO після кожного матчу, приріст чи втрата за сьогодні та прогрес до наступного рівня.',
+  'Coach': 'Тренер', 'Plain-language tips: weak maps, tilt after losses, best time of day to queue.': 'Прості поради: слабкі мапи, тільт після поразок, найкращий час доби для гри.',
+  'Map vetoes': 'Бани мап', 'Which maps your team bans and picks most, month by month.': 'Які мапи твоя команда банить і вибирає найчастіше, місяць за місяцем.',
+  'Activity calendar': 'Календар активності', 'See when you grind and when you take a break, day by day.': 'Видно, коли ти граєш багато, а коли робиш паузу, день за днем.',
+  'Compare players': 'Порівняння гравців', 'Put two profiles side by side with shared chart scales.': 'Два профілі поруч зі спільною шкалою графіків.',
+  'Achievements': 'Досягнення', 'Aces, win streaks, 100+ ADR games and more, unlocked from your matches.': 'Ейси, серії перемог, матчі зі 100+ ADR та інше, що відкривається з твоїх матчів.',
+  'up to 500 ELO': 'до 500 ELO', 'Today': 'Сьогодні', 'Max level reached': 'Максимальний рівень',
+  'Loading profile and matches…': 'Завантажую профіль і матчі…', 'Loading ELO history…': 'Завантажую історію ELO…', 'Building your stats…': 'Формую статистику…', 'The free server is waking up, this can take up to a minute…': 'Безкоштовний сервер прокидається, це може тривати до хвилини…',
+  'Player not found': 'Гравця не знайдено', 'API key rejected': 'API-ключ відхилено', 'Too many requests, try again later': 'Забагато запитів, спробуй пізніше', 'Too many requests, wait a minute': 'Забагато запитів, зачекай хвилину', 'Could not reach FACEIT': 'Не вдалося зв’язатися з FACEIT',
+  'Enter a nickname or a link like https://www.faceit.com/en/players/Nickname': 'Введи нікнейм або посилання виду https://www.faceit.com/en/players/Nickname', 'No matches found with these filters.': 'За цими фільтрами матчів не знайдено.', 'No matches found.': 'Матчів не знайдено.',
+  'Matches': 'Матчі', 'Win rate': 'Відсоток перемог', 'K/D': 'K/D', 'Avg kills': 'Середні вбивства', 'Headshot %': 'Хедшоти %', 'Kills': 'Вбивства', 'Deaths': 'Смерті', 'Assists': 'Асисти', 'Best match': 'Кращий матч', 'ELO net': 'Зміна ELO',
+  'Coach: what to fix': 'Тренер: що виправити', 'Records': 'Рекорди', 'Wins vs losses': 'Перемоги та поразки', 'Map activity': 'Активність на мапах', 'By map': 'По мапах', 'Map veto: bans and picks': 'Бани й піки мап', 'All matches': 'Усі матчі', 'ELO history': 'Історія ELO',
+  'Grey: each match · Orange: average of last 10 · Hover a point for details': 'Сірий: кожен матч · Помаранчевий: середнє за останні 10 · Наведи на точку для деталей', 'Both charts use the same scale.': 'Обидва графіки мають однакову шкалу.',
+  'Darker = more matches that day · Hover a day for details': 'Темніше = більше матчів за день · Наведи на день для деталей', 'Rule-of-thumb advice based on your numbers, not a guarantee.': 'Орієнтовні поради на основі твоїх цифр, а не гарантія.',
+  'At least 20 matches are needed for reliable advice.': 'Для надійних порад потрібно щонайменше 20 матчів.', 'White: matches played (vs your most played map) · Green: win rate (outer ring = 100%)': 'Білий: зіграні матчі (відносно найпопулярнішої мапи) · Зелений: % перемог (зовнішнє коло = 100%)',
+  'Not enough ELO data in this period.': 'За цей період замало даних про ELO.', 'Net change over this period:': 'Зміна за період:', '· Peak': '· Максимум', '· Lowest': '· Мінімум', '· Dashed lines: level boundaries · Hover a point for details': '· Пунктир: межі рівнів · Наведи на точку для деталей',
+  'Map': 'Мапа', 'Result': 'Результат', 'Date': 'Дата', 'In wins': 'У перемогах', 'In losses': 'У поразках', 'Player': 'Гравець', 'WIN': 'ПЕРЕМОГА', 'LOSS': 'ПОРАЗКА', 'Avg deaths': 'Середні смерті',
+  'Longest win streak': 'Найдовша серія перемог', 'Longest loss streak': 'Найдовша серія поразок', 'Current streak': 'Поточна серія', 'Most kills': 'Найбільше вбивств', 'Best K/D (10+ kills)': 'Кращий K/D (10+ вбивств)', 'Most assists': 'Найбільше асистів', 'Highest ADR': 'Найвищий ADR',
+  'Biggest ELO gain': 'Найбільший приріст ELO', 'Biggest ELO loss': 'Найбільша втрата ELO', 'Best map (10+ matches)': 'Краща мапа (10+ матчів)', 'Worst map (10+ matches)': 'Гірша мапа (10+ матчів)',
+  'Ace': 'Ейс', 'Quadro': 'Квадро', 'Thirty bomb': 'Тридцятка', 'Heavy hitter': 'Важкий удар', 'Sharpshooter': 'Снайпер', 'Hot streak': 'Гаряча серія', 'Veteran': 'Ветеран', 'MVP': 'MVP', 'Climber': 'Скелелаз', 'locked': 'закрито',
+  'Penta kill in a round': 'П’ять вбивств за раунд', '4 kills in a round': '4 вбивства за раунд', '30+ kills in a match': '30+ вбивств за матч', '100+ ADR in a match': '100+ ADR за матч', '70%+ headshots, 10+ kills': '70%+ хедшотів, 10+ вбивств', '5+ wins in a row': '5+ перемог поспіль', '100+ matches played': '100+ зіграних матчів', '7+ MVPs in a match': '7+ MVP за матч', '+100 ELO overall': '+100 ELO загалом',
+  'Download CSV': 'Завантажити CSV', 'Download stats card': 'Завантажити картку', 'Show more': 'Показати ще', 'Analyze vetoes': 'Аналізувати бани', 'Import': 'Імпортувати', 'Filter by map, e.g. mirage': 'Фільтр за мапою, напр. mirage', 'Loading match…': 'Завантажую матч…',
+  'Your team bans': 'Бани вашої команди', 'Opponent bans': 'Бани суперників', 'Your team picks': 'Піки вашої команди', 'Opponent picks': 'Піки суперників', 'Most banned by your team:': 'Ваша команда найчастіше банить:',
+  'Bans are made by the team captain, so your team\'s bans are not always your own.': 'Бани робить капітан команди, тож бани команди не завжди твої власні.', 'The veto history was empty for these matches.': 'Історія вето для цих матчів порожня.',
+  'Too many deaths': 'Забагато смертей', 'Strong K/D': 'Сильний K/D', 'Low damage per round': 'Низький урон за раунд', 'High damage output': 'Високий урон', 'Crosshair placement': 'Розташування прицілу', 'Good aim': 'Хороше прицілювання', 'You fall apart in lost games': 'Ти «розсипаєшся» в програних матчах',
+  'Recent dip': 'Нещодавній спад', 'You are on the rise': 'Ти на підйомі', 'Tilt after a loss': 'Тільт після поразки', 'Balanced profile': 'Збалансований профіль', 'No clear weak spots found. Keep playing and check back after more matches.': 'Явних слабких місць не знайдено. Грай далі й перевір ще раз після більшої кількості матчів.',
+  'Import ELO history manually': 'Імпорт історії ELO вручну', 'Click for match details': 'Натисни, щоб побачити деталі матчу',
+};
+const TOD = { 'at night (00-06)': 'вночі (00–06)', 'in the morning (06-12)': 'вранці (06–12)', 'in the afternoon (12-18)': 'вдень (12–18)', 'in the evening (18-24)': 'ввечері (18–24)' };
+const UKP = [
+  [/^Level (\d+)$/, m => `Рівень ${m[1]}`], [/^(\d+) of (\d+) matches$/, m => `${m[1]} з ${m[2]} матчів`], [/^(\d+) matches$/, m => `${m[1]} матчів`],
+  [/^(\d+) ELO to level (\d+)$/, m => `${m[1]} ELO до рівня ${m[2]}`], [/^★ Save (.+)$/, m => `★ Зберегти ${m[1]}`],
+  [/^(\d+) kills$/, m => `${m[1]} вбивств`], [/^(\d+) assists$/, m => `${m[1]} асистів`], [/^(\d+) wins?$/, m => `${m[1]} перемог`], [/^(\d+) loss(?:es)?$/, m => `${m[1]} поразок`], [/^best (\d+)$/, m => `рекорд ${m[1]}`],
+  [/^Form: kills per match \(last (\d+)\)$/, m => `Форма: вбивства за матч (останні ${m[1]})`], [/^ELO history \(last (\d+) matches, from FACEIT\)$/, m => `Історія ELO (останні ${m[1]} матчів, з FACEIT)`],
+  [/^ELO tracker \(since (.+)\)$/, m => `Трекер ELO (з ${m[1]})`], [/^Activity \(last (\d+) weeks\)$/, m => `Активність (останні ${m[1]} тижнів)`],
+  [/^Showing (\d+) of (\d+)$/, m => `Показано ${m[1]} з ${m[2]}`], [/^Last (25|50|100) matches$/, m => `Останні ${m[1]} матчів`], [/^Month (\d{4}-\d{2})$/, m => `Місяць ${m[1]}`],
+  [/^Analyzing (\d+) \/ (\d+)…$/, m => `Аналізую ${m[1]} / ${m[2]}…`], [/^Done: (\d+) matches$/, m => `Готово: ${m[1]} матчів`],
+  [/^\((.+)\)\. You were captain in (\d+) of (\d+) matches\.(?: (\d+) matches had no veto data\.)?$/, m => `(${m[1]}). Ти був капітаном у ${m[2]} з ${m[3]} матчів.` + (m[4] ? ` Для ${m[4]} матчів даних вето немає.` : '')],
+  [/^You were captain in (\d+) of (\d+) matches\.(?: (\d+) matches had no veto data\.)?$/, m => `Ти був капітаном у ${m[1]} з ${m[2]} матчів.` + (m[3] ? ` Для ${m[3]} матчів даних вето немає.` : '')],
+  [/^Weak map: (.+)$/, m => `Слабка мапа: ${m[1]}`], [/^Strong map: (.+)$/, m => `Сильна мапа: ${m[1]}`], [/^Weaker (.+)$/, m => `Слабше ${TOD[m[1]] || m[1]}`], [/^Best (at night.*|in the .*)$/, m => `Найкраще ${TOD[m[1]] || m[1]}`],
+  [/^You die ([\d.]+) times per match with a K\/D of ([\d.]+)\. Stay closer to teammates so deaths get traded, and avoid dry peeks without utility\.$/, m => `Ти помираєш ${m[1]} разів за матч при K/D ${m[2]}. Тримайся ближче до команди, щоб твої смерті відігрували, і не виходь у «сухий» пік без гранат.`],
+  [/^K\/D ([\d.]+) is a real strength\. Convert it into wins by taking more entry duels for your team\.$/, m => `K/D ${m[1]} — твоя сильна сторона. Перетвори його на перемоги, частіше беручи вхідні дуелі для команди.`],
+  [/^ADR ([\d.]+) is under ~70\. Use flashes and smokes to get safer duels, and keep trading damage even when you do not get the kill\.$/, m => `ADR ${m[1]} нижче ~70. Використовуй флешки та смоки для безпечніших дуелей і наносити урон, навіть коли не вбиваєш.`],
+  [/^ADR ([\d.]+) shows you are consistently active in rounds\.$/, m => `ADR ${m[1]} показує, що ти стабільно активний у раундах.`],
+  [/^Headshot rate ([\d.]+)% is low\. Keep the crosshair at head level and pre-aim common angles\.$/, m => `Відсоток хедшотів ${m[1]}% низький. Тримай приціл на рівні голови та заздалегідь цілься в типові кути.`],
+  [/^Headshot rate ([\d.]+)% is solid\. Keep warming up before queueing\.$/, m => `Відсоток хедшотів ${m[1]}% хороший. Продовжуй розминатися перед грою.`],
+  [/^Only ([\d.]+)% wins over (\d+) matches \(overall ([\d.]+)%\)\. Practice it or ban it in the veto\.$/, m => `Лише ${m[1]}% перемог за ${m[2]} матчів (загалом ${m[3]}%). Потренуй її або бань у вето.`],
+  [/^([\d.]+)% wins over (\d+) matches\. Pick it more often\.$/, m => `${m[1]}% перемог за ${m[2]} матчів. Вибирай її частіше.`],
+  [/^You die ([\d.]+) times per loss versus ([\d.]+) per win\. Slow down when behind: play for trades, not hero peeks\.$/, m => `Ти помираєш ${m[1]} разів за поразку проти ${m[2]} за перемогу. Коли програєш, грай повільніше: шукай обміни, а не героїчні піки.`],
+  [/^Last 20 matches: K\/D ([\d.]+) versus ([\d.]+) overall\. Consider a break or a warm-up routine\.$/, m => `Останні 20 матчів: K/D ${m[1]} проти ${m[2]} загалом. Спробуй зробити перерву або розминку.`],
+  [/^Last 20 matches: K\/D ([\d.]+) versus ([\d.]+) overall\.$/, m => `Останні 20 матчів: K/D ${m[1]} проти ${m[2]} загалом.`],
+  [/^Win rate ([\d.]+)% over (\d+) matches versus ([\d.]+)% overall\. Try to queue at other times\.$/, m => `Відсоток перемог ${m[1]}% за ${m[2]} матчів проти ${m[3]}% загалом. Спробуй грати в інший час.`],
+  [/^Win rate ([\d.]+)% over (\d+) matches\. This is your best time to play\.$/, m => `Відсоток перемог ${m[1]}% за ${m[2]} матчів. Це твій найкращий час для гри.`],
+  [/^After a loss you win ([\d.]+)% of games, after a win ([\d.]+)%\. Take a short break after two losses in a row\.$/, m => `Після поразки ти вигруєш ${m[1]}% ігор, після перемоги ${m[2]}%. Роби коротку перерву після двох поразок поспіль.`],
+];
+function trStr(t) {
+  if (UK[t] != null) return UK[t];
+  for (const [re, f] of UKP) { const m = t.match(re); if (m) return f(m); }
+  if (t.includes(' · ')) { const parts = t.split(' · ').map(x => trStr(x.trim())); return parts.join(' · '); }
+  return t;
+}
+function tr(s) { if (LANG !== 'uk') return s; const t = s.trim(); if (!t) return s; const o = trStr(t); return o === t ? s : s.replace(t, o); }
+function trNode(n) {
+  if (n.nodeType === 3) { const v = tr(n.nodeValue); if (v !== n.nodeValue) n.nodeValue = v; return; }
+  if (n.nodeType !== 1 || n.nodeName === 'SCRIPT' || n.nodeName === 'STYLE') return;
+  for (const a of ['placeholder', 'title', 'aria-label']) if (n.hasAttribute(a)) { const v = tr(n.getAttribute(a)); if (v !== n.getAttribute(a)) n.setAttribute(a, v); }
+  n.childNodes.forEach(trNode);
+}
+$('lang').textContent = LANG === 'uk' ? 'EN' : 'UA';
+$('lang').addEventListener('click', () => { try { localStorage.setItem('lang', LANG === 'uk' ? 'en' : 'uk'); } catch (e) {} location.reload(); });
+if (LANG === 'uk' && typeof MutationObserver !== 'undefined') {
+  document.documentElement.lang = 'uk';
+  new MutationObserver(list => list.forEach(m => { m.addedNodes.forEach(trNode); if (m.type === 'characterData') trNode(m.target); })).observe(document.body, { childList: true, subtree: true, characterData: true });
+  trNode(document.body);
 }
 </script>
 </body>

@@ -8,14 +8,18 @@
 
 Ключ лишається тут, на сервері, і в браузер ніколи не потрапляє.
 """
+import hashlib
+import hmac
 import json
 import os
 import re
 import sys
+import threading
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -27,6 +31,44 @@ HERE = Path(__file__).parent
 CACHE_SECONDS = 300
 MAX_PAGES = 20
 cache = {}
+
+# --- Захист і статистика відвідувань ---
+RATE_LIMIT = int(os.environ.get("RATE_LIMIT_PER_MIN", "60"))          # запитів до /api/ за хвилину з однієї адреси
+ADMIN_KEY = os.environ.get("ADMIN_KEY", "")                           # якщо задано, відкриває /metrics?key=...
+GC_CODE = re.sub(r"[^a-z0-9-]", "", os.environ.get("GOATCOUNTER_CODE", "").lower())
+SALT = os.urandom(8).hex()
+hits, lock = {}, threading.Lock()
+metrics = {"page_views": 0, "api_calls": 0, "rate_limited": 0, "since": time.time(), "visitors": {}}
+
+
+def client_ip(handler):
+    fwd = handler.headers.get("X-Forwarded-For", "")
+    return (fwd.split(",")[0].strip() if fwd else handler.client_address[0]) or "?"
+
+
+def allowed(ip, cost=1):
+    """Ковзне вікно 60 с на адресу. Запити, що тягнуть багато даних, коштують дорожче."""
+    now = time.time()
+    with lock:
+        q = hits.setdefault(ip, deque())
+        while q and now - q[0] > 60:
+            q.popleft()
+        if len(q) + cost > RATE_LIMIT:
+            return False
+        q.extend([now] * cost)
+        if len(hits) > 5000:
+            for k in [k for k, v in hits.items() if not v or now - v[-1] > 60][:1000]:
+                hits.pop(k, None)
+        return True
+
+
+def note_visitor(ip):
+    day = time.strftime("%Y-%m-%d")
+    h = hashlib.sha256((ip + day + SALT).encode()).hexdigest()[:16]      # сира адреса не зберігається
+    with lock:
+        metrics["visitors"].setdefault(day, set()).add(h)
+        for old in sorted(metrics["visitors"])[:-30]:
+            metrics["visitors"].pop(old, None)
 
 
 class ApiError(Exception):
@@ -80,6 +122,22 @@ def nickname_from_link(link):
     return None
 
 
+def get_rank(pid, region, country):
+    """Позиція гравця в регіональному та національному рейтингу (офіційний API)."""
+    out = {"regionName": region, "countryCode": country}
+    if not region:
+        return out
+    for key, params in (("region", {"limit": 1}), ("country", {"limit": 1, "country": country})):
+        if key == "country" and not country:
+            continue
+        try:
+            r = api_get("/rankings/games/%s/regions/%s/players/%s" % (GAME, region, pid), params)
+            out[key] = to_int(r.get("position")) or None
+        except ApiError:
+            pass
+    return out
+
+
 def fetch_player(nickname):
     player = api_get("/players", {"nickname": nickname})
     cs2 = (player.get("games") or {}).get(GAME) or {}
@@ -120,6 +178,7 @@ def fetch_player(nickname):
 
     return {
         "player_id": player["player_id"],
+        "rank": get_rank(player["player_id"], cs2.get("region"), player.get("country")),
         "nickname": player.get("nickname", nickname),
         "avatar": player.get("avatar", ""),
         "elo": cs2.get("faceit_elo"),
@@ -231,6 +290,39 @@ def fetch_elo(pid):
     return out
 
 
+match_cache = {}
+
+
+def fetch_match(mid):
+    """Табло матчу: команди, рахунок і статистика гравців (офіційний API)."""
+    hit = match_cache.get(mid)
+    if hit and time.time() - hit[0] < 3600:
+        return hit[1]
+    data = api_get("/matches/%s/stats" % urllib.parse.quote(mid))
+    rounds = data.get("rounds") or []
+    if not rounds:
+        raise ApiError(404, "No stats for this match")
+    r = rounds[0]
+    rs = r.get("round_stats") or {}
+    teams = []
+    for t in r.get("teams") or []:
+        ts = t.get("team_stats") or {}
+        players = []
+        for p in t.get("players") or []:
+            ps = p.get("player_stats") or {}
+            players.append({"id": p.get("player_id"), "nick": p.get("nickname"), "k": to_int(ps.get("Kills")),
+                            "d": to_int(ps.get("Deaths")), "a": to_int(ps.get("Assists")), "adr": to_float(ps.get("ADR")),
+                            "hs": to_float(ps.get("Headshots %")), "mvp": to_int(ps.get("MVPs"))})
+        players.sort(key=lambda x: x["k"], reverse=True)
+        teams.append({"name": ts.get("Team") or t.get("team_id"), "score": to_int(ts.get("Final Score")),
+                      "win": to_int(ts.get("Team Win")) == 1, "players": players})
+    out = {"map": rs.get("Map", ""), "score": rs.get("Score", ""), "teams": teams}
+    if len(match_cache) >= 500:
+        match_cache.pop(min(match_cache, key=lambda k: match_cache[k][0]))
+    match_cache[mid] = (time.time(), out)
+    return out
+
+
 class Handler(BaseHTTPRequestHandler):
     def send_bytes(self, status, body, ctype):
         self.send_response(status)
@@ -250,6 +342,40 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         url = urllib.parse.urlparse(self.path)
+        ip = client_ip(self)
+
+        if url.path.startswith("/api/"):
+            cost = 4 if url.path == "/api/vetoes" else 1
+            if not allowed(ip, cost):
+                metrics["rate_limited"] += 1
+                self.send_json(429, {"error": "Too many requests, wait a minute"})
+                return
+            metrics["api_calls"] += 1
+
+        if url.path == "/metrics":
+            key = urllib.parse.parse_qs(url.query).get("key", [""])[0]
+            if not ADMIN_KEY or not hmac.compare_digest(key, ADMIN_KEY):
+                self.send_bytes(404, b"Not found", "text/plain")
+                return
+            today = time.strftime("%Y-%m-%d")
+            self.send_json(200, {"uptime_hours": round((time.time() - metrics["since"]) / 3600, 1),
+                                 "page_views": metrics["page_views"], "api_calls": metrics["api_calls"],
+                                 "rate_limited": metrics["rate_limited"],
+                                 "unique_visitors_today": len(metrics["visitors"].get(today, ())),
+                                 "unique_visitors_by_day": {d: len(v) for d, v in sorted(metrics["visitors"].items())},
+                                 "note": "Counters reset when the server restarts"})
+            return
+
+        if url.path == "/api/match":
+            mid = urllib.parse.parse_qs(url.query).get("id", [""])[0]
+            if not re.fullmatch(r"[0-9A-Za-z-]{10,80}", mid):
+                self.send_json(400, {"error": "Bad request"})
+                return
+            try:
+                self.send_json(200, fetch_match(mid))
+            except ApiError as e:
+                self.send_json(e.status if e.status in (401, 403, 404, 429) else 502, {"error": str(e)})
+            return
 
         static = {"/robots.txt": ("robots.txt", "text/plain; charset=utf-8"),
                   "/sitemap.xml": ("sitemap.xml", "application/xml; charset=utf-8"),
@@ -267,7 +393,13 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if url.path == "/":
-            self.send_bytes(200, (HERE / "index.html").read_bytes(), "text/html; charset=utf-8")
+            metrics["page_views"] += 1
+            note_visitor(ip)
+            page = (HERE / "index.html").read_bytes()
+            if GC_CODE:                      # необов'язкова безкоштовна аналітика GoatCounter
+                tag = '<script data-goatcounter="https://%s.goatcounter.com/count" async src="//gc.zgo.at/count.js"></script></body>' % GC_CODE
+                page = page.replace(b"</body>", tag.encode(), 1)
+            self.send_bytes(200, page, "text/html; charset=utf-8")
             return
 
         if url.path == "/api/debug":
