@@ -166,7 +166,7 @@
     </div>
     <h3 id="ftitle" hidden>Friends</h3><div class="scroll" id="ftab"></div>
     <h3 id="rtitle" hidden>Recently viewed</h3><div class="rcards" id="recent"></div>
-    <h3>What you get</h3><div class="feat"><div class="ft"><svg viewBox="0 0 40 40" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 29l9-11 6 6 12-15"/><circle cx="31" cy="9" r="2.5"/></svg><b>ELO tracker</b><small>Real ELO history after every match, today's gain or loss and progress to the next level.</small></div><div class="ft"><svg viewBox="0 0 40 40" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="20" cy="20" r="9"/><path d="M20 4v7M20 29v7M4 20h7M29 20h7"/></svg><b>Coach</b><small>Plain-language tips: weak maps, tilt after losses, best time of day to queue.</small></div><div class="ft"><svg viewBox="0 0 40 40" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 6v29"/><path d="M10 8h19l-5 6 5 6H10"/></svg><b>Map vetoes</b><small>Which maps your team bans and picks most, month by month.</small></div><div class="ft"><svg viewBox="0 0 40 40" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="9" width="28" height="25" rx="3"/><path d="M6 17h28M13 5v7M27 5v7"/></svg><b>Activity calendar</b><small>See when you grind and when you take a break, day by day.</small></div><div class="ft"><svg viewBox="0 0 40 40" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="15" cy="20" r="9"/><circle cx="25" cy="20" r="9"/></svg><b>Compare players</b><small>Put two profiles side by side with shared chart scales.</small></div><div class="ft"><svg viewBox="0 0 40 40" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="20,3 35,11 35,29 20,37 5,29 5,11"/><path d="M14 20l4 4 8-9"/></svg><b>Achievements</b><small>Aces, win streaks, 100+ ADR games and more, unlocked from your matches.</small></div></div>
+    <h3>What you get</h3><div class="feat"><div class="ft"><svg viewBox="0 0 40 40" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 29l9-11 6 6 12-15"/><circle cx="31" cy="9" r="2.5"/></svg><b>ELO tracker</b><small>Real ELO history after every match, today's gain or loss and progress to the next level.</small></div><div class="ft"><svg viewBox="0 0 40 40" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="20" cy="20" r="9"/><path d="M20 4v7M20 29v7M4 20h7M29 20h7"/></svg><b>Coach</b><small>Plain-language tips: weak maps, tilt after losses, best time of day to queue.</small></div><div class="ft"><svg viewBox="0 0 40 40" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 6v29"/><path d="M10 8h19l-5 6 5 6H10"/></svg><b>Map vetoes</b><small>Which maps your team bans and picks most, month by month.</small></div><div class="ft"><svg viewBox="0 0 40 40" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="9" width="28" height="25" rx="3"/><path d="M6 17h28M13 5v7M27 5v7"/></svg><b>Activity calendar</b><small>See when you grind and when you take a break, day by day.</small></div><div class="ft"><svg viewBox="0 0 40 40" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="15" cy="20" r="9"/><circle cx="25" cy="20" r="9"/></svg><b>Compare players</b><small>Put two profiles side by side with shared chart scales.</small></div><div class="ft"><svg viewBox="0 0 40 40" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="20,3 35,11 35,29 20,37 5,29 5,11"/><path d="M14 20l4 4 8-9"/></svg><b>Achievements</b><small>Aces, win streaks, 100+ ADR games and more, unlocked from your matches.</small></div><div class="ft"><svg viewBox="0 0 40 40" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="8" width="30" height="20" rx="3"/><path d="M15 34h10M20 28v6"/></svg><b>Stream overlay</b><small>A transparent OBS overlay with today's wins, losses, K/D and ELO change.</small></div></div>
     <h3>FACEIT levels</h3><div class="ladder" id="ladder"></div>
   </section>
   <section id="out" hidden></section>
@@ -525,6 +525,10 @@ $('out').addEventListener('click', e => {
   if (e.target.id === 'more') { T.shown += 25; drawTable(); }
   if (e.target.id === 'vgo') runVeto();
   if (e.target.id === 'tgo') runTeam();
+  if (e.target.id === 'ovcopy') {
+    const v = $('ovurl').value;
+    (navigator.clipboard ? navigator.clipboard.writeText(v).then(() => msg('Overlay link copied.')) : Promise.reject()).catch(() => prompt('Copy this link:', v));
+  }
   if (e.target.id === 'goalnext') $('goal').value = e.target.dataset.v;
   if (e.target.id === 'goalset') setGoal();
   if (e.target.id === 'eimpgo') {
@@ -884,6 +888,14 @@ async function drawFriendsTable() {
     (r.error ? '<td colspan="4" class="muted">–</td>' : `<td>${badge(r.elo ? lvlInfo(r.elo).l : (+r.level || 1), 26)}</td><td>${r.elo || '–'}</td><td>${r.kd == null ? '–' : f2(r.kd)}</td><td>${r.wr == null ? '–' : f1(r.wr) + '%'}</td>`) + '</tr>').join('') + '</table>';
 }
 
+// ---------- Оверлей для стрімерів ----------
+function overlaySection(p) {
+  const url = (typeof location !== 'undefined' ? location.origin : '') + '/overlay?u=' + encodeURIComponent(p.nickname);
+  return `<h3>Stream overlay (OBS)</h3><p class="legend">Shows today's wins, losses, K/D, ELO change and your last 5 matches on stream. In OBS add a Browser source with this address, size about 560×110.</p>` +
+    `<div class="tools"><input id="ovurl" readonly value="${esc(url)}"><button class="ghost" id="ovcopy" type="button">Copy link</button><a class="lnk" href="${esc(url)}" target="_blank" rel="noopener">Preview</a></div>` +
+    '<p class="legend">Open it before your first match of the day so the ELO change counts from the start.</p>';
+}
+
 function single(p) {
   const ms = slice(p), s = st(ms), best = Math.max(...ms.map(m => m.kills));
   const dd = ms.filter(m => m.delta != null), net = dd.length ? dd.reduce((a, m) => a + m.delta, 0) : null;
@@ -891,7 +903,7 @@ function single(p) {
     ...(s.adr != null ? [['ADR', f1(s.adr)]] : []), ...(s.hs != null ? [['Headshot %', f1(s.hs) + '%']] : []),
     ['Kills', s.kills], ['Deaths', s.deaths], ['Assists', s.assists], ['Best match', best + ' kills'], ...(net != null ? [['ELO net', (net > 0 ? '+' : '') + net]] : [])];
   return head(p, ms.length) + `<div class="cards">${cards.map(([l, v]) => `<div class="card"><b>${esc(v)}</b><small>${l}</small></div>`).join('')}</div>` +
-    eloBlock(p) + eloGoal(p) + coach(ms) + chart(ms) + records(ms) + badges(p) + calendar(p) + winloss(ms) + periodCompare(p) + radar(ms) + maps(ms) + vetoSection() + teamSection() + tableSection() + '<p><button class="ghost" id="csv" type="button">Download CSV</button> <button class="ghost" id="card" type="button">Download stats card</button></p>';
+    eloBlock(p) + eloGoal(p) + coach(ms) + chart(ms) + records(ms) + badges(p) + calendar(p) + winloss(ms) + periodCompare(p) + radar(ms) + maps(ms) + vetoSection() + teamSection() + overlaySection(p) + tableSection() + '<p><button class="ghost" id="csv" type="button">Download CSV</button> <button class="ghost" id="card" type="button">Download stats card</button></p>';
 }
 
 function compare(p, q) {
@@ -974,6 +986,10 @@ const UK = {
   'Period comparison': 'Порівняння періодів', 'Current': 'Поточний', 'Previous': 'Попередній', 'Change': 'Зміна', 'Metric': 'Показник', 'Games together': 'Ігор разом', 'Wins': 'Перемоги', 'Level': 'Рівень',
   'Not enough matches in one of the periods.': 'В одному з періодів замало матчів.', 'No match ids available.': 'Немає ідентифікаторів матчів.', 'K/D (last 20)': 'K/D (останні 20)', 'Win rate (last 20)': 'Відсоток перемог (останні 20)',
   'No team data could be loaded for these matches.': 'Для цих матчів не вдалося завантажити склад команд.', 'Not enough repeat teammates in this period.': 'За цей період замало напарників, з якими ти грав кілька разів.',
+  'Stream overlay (OBS)': 'Оверлей для стріму (OBS)', 'Stream overlay': 'Оверлей для стріму', 'Copy link': 'Копіювати посилання', 'Preview': 'Попередній перегляд', 'Overlay link copied.': 'Посилання на оверлей скопійовано.',
+  'A transparent OBS overlay with today\'s wins, losses, K/D and ELO change.': 'Прозорий оверлей для OBS із сьогоднішніми перемогами, поразками, K/D та зміною ELO.',
+  'Shows today\'s wins, losses, K/D, ELO change and your last 5 matches on stream. In OBS add a Browser source with this address, size about 560×110.': 'Показує на стрімі сьогоднішні перемоги, поразки, K/D, зміну ELO та 5 останніх матчів. В OBS додай джерело Browser з цією адресою, розмір приблизно 560×110.',
+  'Open it before your first match of the day so the ELO change counts from the start.': 'Відкрий його до першого матчу дня, щоб зміна ELO рахувалась від самого початку.',
   'Import ELO history manually': 'Імпорт історії ELO вручну', 'Click for match details': 'Натисни, щоб побачити деталі матчу',
 };
 const TOD = { 'at night (00-06)': 'вночі (00–06)', 'in the morning (06-12)': 'вранці (06–12)', 'in the afternoon (12-18)': 'вдень (12–18)', 'in the evening (18-24)': 'ввечері (18–24)' };
