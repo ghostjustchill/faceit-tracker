@@ -339,9 +339,11 @@ def fetch_recent(nick):
     for it in data.get("items") or []:
         st = it.get("stats") or {}
         ms.append({"win": to_int(st.get("Result")) == 1, "k": to_int(st.get("Kills")), "d": to_int(st.get("Deaths")),
+                   "adr": to_float(st.get("ADR")), "krr": to_float(st.get("K/R Ratio")), "hs": to_int(st.get("Headshots")),
                    "finished": to_int(st.get("Match Finished At"))})
     out = {"nickname": player.get("nickname", nick), "avatar": player.get("avatar", ""), "elo": cs2.get("faceit_elo"),
-           "level": cs2.get("skill_level"), "matches": ms}
+           "level": cs2.get("skill_level"), "matches": ms, "pid": player["player_id"], "region": cs2.get("region"),
+           "country": player.get("country")}
     if len(recent_cache) >= 500:
         recent_cache.pop(min(recent_cache, key=lambda k: recent_cache[k][0]))
     recent_cache[key] = (time.time(), out)
@@ -361,11 +363,40 @@ def brief(nick):
             "kd": kd_of(ms), "wr": round(100 * sum(m["win"] for m in ms) / len(ms), 1) if ms else None}
 
 
+rank_cache = {}
+
+
+def rank_cached(pid, region, country):
+    hit = rank_cache.get(pid)
+    if hit and time.time() - hit[0] < 600:
+        return hit[1]
+    out = get_rank(pid, region, country)
+    if len(rank_cache) >= 500:
+        rank_cache.pop(min(rank_cache, key=lambda k: rank_cache[k][0]))
+    rank_cache[pid] = (time.time(), out)
+    return out
+
+
+def window_stats(ms):
+    """Показники за вікно матчів: K/D, K/R, ADR, середні вбивства, HS%, відсоток перемог."""
+    if not ms:
+        return None
+    n = len(ms)
+    k, d = sum(m["k"] for m in ms), sum(m["d"] for m in ms)
+    adrs = [m["adr"] for m in ms if m["adr"] > 0]
+    return {"n": n, "kd": round(k / d if d else k, 2), "krr": round(sum(m["krr"] for m in ms) / n, 2),
+            "adr": round(sum(adrs) / len(adrs), 1) if adrs else None, "avg": round(k / n, 1),
+            "hs": round(100 * sum(m["hs"] for m in ms) / k) if k else None,
+            "wr": round(100 * sum(m["win"] for m in ms) / n)}
+
+
 def overlay(nick, since):
     r = fetch_recent(nick)
     sess = [m for m in r["matches"] if m["finished"] >= since]
     return {"nickname": r["nickname"], "elo": r["elo"], "level": r["level"], "wins": sum(m["win"] for m in sess),
-            "losses": sum(not m["win"] for m in sess), "kd": kd_of(sess), "last5": [m["win"] for m in r["matches"][:5]]}
+            "losses": sum(not m["win"] for m in sess), "stats": window_stats(r["matches"][:20]),
+            "last5": [{"win": m["win"], "k": m["k"], "d": m["d"]} for m in r["matches"][:5]],
+            "rank": rank_cached(r["pid"], r["region"], r["country"])}
 
 
 def matches_batch(ids):

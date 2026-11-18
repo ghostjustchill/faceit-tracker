@@ -400,7 +400,7 @@ function head(p, shown) {
   const today = d == null ? '' : `<div class="today"><small>Today</small><b class="${d > 0 ? 'win' : d < 0 ? 'loss' : ''}">${d > 0 ? '+' : ''}${d} ELO</b></div>`;
   const bar = li ? `<div class="lvbar"><i style="width:${li.pct.toFixed(1)}%"></i></div><small class="muted">${li.next ? li.left + ' ELO to level ' + (lv + 1) : 'Max level reached'}</small>` : '';
   return `<div class="head"><div class="av">${p.avatar ? `<img src="${esc(p.avatar)}" alt="">` : ''}${badge(lv, 28)}</div><div class="hinfo"><h2>${esc(p.nickname)}</h2><p>` +
-    ['Level ' + lv, p.elo ? p.elo + ' ELO' : '', p.rank && p.rank.region ? '#' + p.rank.region + ' ' + p.rank.regionName : '', p.rank && p.rank.country ? '#' + p.rank.country + ' ' + p.rank.countryCode : '', shown + ' of ' + p.matches.length + ' matches'].filter(Boolean).join(' · ') + `</p>${strip(p)}${bar}</div>${today}</div>`;
+    ['Level ' + lv, p.elo ? p.elo + ' ELO' : '', p.rank && p.rank.region ? '#' + p.rank.region + ' ' + p.rank.regionName : '', p.rank && p.rank.country ? '#' + p.rank.country + ' ' + String(p.rank.countryCode || '').toUpperCase() : '', shown + ' of ' + p.matches.length + ' matches'].filter(Boolean).join(' · ') + `</p>${strip(p)}${bar}</div>${today}</div>`;
 }
 
 function render() {
@@ -767,7 +767,7 @@ function downloadCard(p) {
   g.fillStyle = col; g.font = `700 ${lv === 10 ? 44 : 54}px ${F}`; g.textAlign = 'center'; g.fillText(String(lv), 120, lv === 10 ? 206 : 209); g.textAlign = 'left';
   g.fillStyle = '#e8eaed'; g.font = `700 68px ${F}`; g.fillText(p.nickname, 200, 188);
   g.fillStyle = '#8b93a1'; g.font = `400 30px ${F}`;
-  g.fillText([p.elo ? p.elo + ' ELO' : '', p.rank && p.rank.country ? '#' + p.rank.country + ' ' + p.rank.countryCode : '', ms.length + ' matches'].filter(Boolean).join('  ·  '), 202, 232);
+  g.fillText([p.elo ? p.elo + ' ELO' : '', p.rank && p.rank.country ? '#' + p.rank.country + ' ' + String(p.rank.countryCode || '').toUpperCase() : '', ms.length + ' matches'].filter(Boolean).join('  ·  '), 202, 232);
   if (li && li.next) { g.fillStyle = '#2a2e38'; g.fillRect(60, 268, 1080, 10); g.fillStyle = '#ff5500'; g.fillRect(60, 268, 1080 * li.pct / 100, 10); g.fillStyle = '#8b93a1'; g.font = `400 22px ${F}`; g.fillText(li.left + ' ELO to level ' + (lv + 1), 60, 306); }
   // показники
   const items = [['Win rate', f1(s.wr) + '%'], ['K/D', f2(s.kd)], ['Avg kills', f2(s.avg)], ['ADR', s.adr != null ? f1(s.adr) : '–'], ['Headshot %', s.hs != null ? f1(s.hs) + '%' : '–'], ['Matches', String(s.n)]];
