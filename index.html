@@ -118,6 +118,9 @@
   tr.mr { cursor:pointer; } tr.mr:hover td { background:rgba(255,255,255,.05); } tr.md > td { white-space:normal; background:rgba(0,0,0,.18); }
   .mteams { display:grid; grid-template-columns:1fr 1fr; gap:14px; } @media (max-width:700px) { .mteams { grid-template-columns:1fr; } }
   .mteams h4 { margin:4px 0 6px; } .mteams td, .mteams th { padding:4px 8px; font-size:13px; } .mteams tr.me td { color:var(--accent); font-weight:700; }
+  .goalbar { height:8px; background:var(--line); border-radius:4px; overflow:hidden; margin:8px 0; } .goalbar i { display:block; height:100%; background:linear-gradient(90deg,var(--accent),#ffb36b); transition:width .8s ease; }
+  td.best-cell { color:var(--win); font-weight:600; } td.worse { color:var(--loss); } .fav-row td { vertical-align:middle; } .fav-row img { width:28px; height:28px; border-radius:50%; vertical-align:middle; margin-right:8px; background:var(--card); }
+  .fav-row svg { vertical-align:middle; } .fav-row a { color:var(--text); text-decoration:none; } .fav-row a:hover { color:var(--accent); }
   [hidden] { display:none !important; }
 </style>
 </head>
@@ -161,6 +164,7 @@
       <p>Paste a FACEIT nickname or profile link above to see your ELO history, form, map stats, vetoes and coaching tips.</p>
       <p class="tryrow">Not sure where to start? <a class="ghost lnk" href="?u=gh0stik4">Try gh0stik4</a></p>
     </div>
+    <h3 id="ftitle" hidden>Friends</h3><div class="scroll" id="ftab"></div>
     <h3 id="rtitle" hidden>Recently viewed</h3><div class="rcards" id="recent"></div>
     <h3>What you get</h3><div class="feat"><div class="ft"><svg viewBox="0 0 40 40" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 29l9-11 6 6 12-15"/><circle cx="31" cy="9" r="2.5"/></svg><b>ELO tracker</b><small>Real ELO history after every match, today's gain or loss and progress to the next level.</small></div><div class="ft"><svg viewBox="0 0 40 40" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="20" cy="20" r="9"/><path d="M20 4v7M20 29v7M4 20h7M29 20h7"/></svg><b>Coach</b><small>Plain-language tips: weak maps, tilt after losses, best time of day to queue.</small></div><div class="ft"><svg viewBox="0 0 40 40" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 6v29"/><path d="M10 8h19l-5 6 5 6H10"/></svg><b>Map vetoes</b><small>Which maps your team bans and picks most, month by month.</small></div><div class="ft"><svg viewBox="0 0 40 40" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="9" width="28" height="25" rx="3"/><path d="M6 17h28M13 5v7M27 5v7"/></svg><b>Activity calendar</b><small>See when you grind and when you take a break, day by day.</small></div><div class="ft"><svg viewBox="0 0 40 40" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="15" cy="20" r="9"/><circle cx="25" cy="20" r="9"/></svg><b>Compare players</b><small>Put two profiles side by side with shared chart scales.</small></div><div class="ft"><svg viewBox="0 0 40 40" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="20,3 35,11 35,29 20,37 5,29 5,11"/><path d="M14 20l4 4 8-9"/></svg><b>Achievements</b><small>Aces, win streaks, 100+ ADR games and more, unlocked from your matches.</small></div></div>
     <h3>FACEIT levels</h3><div class="ladder" id="ladder"></div>
@@ -210,6 +214,7 @@ $('form').addEventListener('submit', async e => {
 });
 $('range').addEventListener('change', () => D.length && render());
 $('period').addEventListener('change', () => D.length && render());
+$('out').addEventListener('change', e => { if (e.target.id === 'pcmp') { PCMP = +e.target.value; render(); } });
 $('comp').addEventListener('change', () => D.length && render());
 
 function slice(p) {
@@ -519,6 +524,9 @@ $('out').addEventListener('click', e => {
   if (th && th.closest('#tbl')) { const k = th.dataset.k; T.dir = T.k === k ? -T.dir : (k === 'map' ? 1 : -1); T.k = k; drawTable(); }
   if (e.target.id === 'more') { T.shown += 25; drawTable(); }
   if (e.target.id === 'vgo') runVeto();
+  if (e.target.id === 'tgo') runTeam();
+  if (e.target.id === 'goalnext') $('goal').value = e.target.dataset.v;
+  if (e.target.id === 'goalset') setGoal();
   if (e.target.id === 'eimpgo') {
     const n = importElo(D[0], $('eimp').value);
     if (n > 0) { msg('Imported ' + n + ' matches with ELO.'); render(); }
@@ -690,7 +698,7 @@ function badges(p) {
 
 // ---------- Друзі (зберігаються в цьому браузері) ----------
 const getFriends = () => { try { return JSON.parse(localStorage.getItem('friends')) || []; } catch (e) { return []; } };
-const setFriends = l => { try { localStorage.setItem('friends', JSON.stringify(l.slice(0, 20))); } catch (e) {} drawFriends(); };
+const setFriends = l => { try { localStorage.setItem('friends', JSON.stringify(l.slice(0, 20))); } catch (e) {} drawFriends(); drawFriendsTable(); };
 function drawFriends() {
   const l = getFriends(), t = D.length ? D[D.length - 1].nickname : '';
   $('friends').innerHTML = l.map(n => `<span class="chip"><button type="button" data-v="${esc(n)}">${esc(n)}</button><button type="button" data-c="${esc(n)}" title="Compare with the player in the first field">vs</button><button type="button" data-x="${esc(n)}" title="Remove">×</button></span>`).join('');
@@ -730,6 +738,7 @@ function drawHome() {
   $('rtitle').hidden = !l.length;
   $('recent').innerHTML = l.map(x => `<a class="rc" href="?u=${encodeURIComponent(x.n)}">${x.av ? `<img src="${esc(x.av)}" alt="">` : ''}<div><b>${esc(x.n)}</b><small>Level ${x.lv} · ${x.e} ELO</small><small>K/D ${x.kd} · ${x.wr}% wins · ${x.m} matches</small><small>${esc(new Date(x.t).toLocaleDateString())}</small></div></a>`).join('');
   const rng = i => i === 0 ? 'up to 500' : i === 9 ? '2001+' : LV[i] + '–' + (LV[i + 1] - 1);
+  drawFriendsTable();
   $('ladder').innerHTML = LV.map((_, i) => `<div class="lv">${badge(i + 1, 40)}<small>${rng(i)} ELO</small></div>`).join('');
 }
 $('homebtn').addEventListener('click', () => { $('out').hidden = true; $('home').hidden = false; msg(''); drawHome(); window.scrollTo && window.scrollTo(0, 0); });
@@ -769,6 +778,112 @@ function downloadCard(p) {
   c.toBlob(b => { const a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = p.nickname + '_faceit_stats.png'; a.click(); });
 }
 
+// ---------- Ціль по ELO ----------
+function eloGoal(p) {
+  if (!p.elo || !p.eloHist || p.eloHist.length < 10) return '';
+  const key = 'goal:' + p.player_id; let goal = null;
+  try { goal = JSON.parse(localStorage.getItem(key)); } catch (e) {}
+  const li = lvlInfo(p.elo), hist = p.eloHist, last = hist.slice(0, 50), now = Date.now();
+  const avg = last.reduce((a, x) => a + x.delta, 0) / last.length, month = hist.filter(x => x.date >= now - 30 * 864e5).length;
+  const perDay = month ? month / 30 : last.length / Math.max(7, (now - last[last.length - 1].date) / 864e5);
+  let body = `<div class="tools"><input id="goal" type="number" min="100" max="6000" placeholder="Target ELO" value="${goal ? goal.g : ''}" style="flex:0 1 170px">` +
+    (li.next ? `<button class="ghost" id="goalnext" type="button" data-v="${li.next}">Next level (${li.next})</button>` : '') + '<button class="ghost" id="goalset" type="button">Set goal</button></div>';
+  if (goal) {
+    const left = goal.g - p.elo;
+    if (left <= 0) body += `<p>Goal reached: ${p.elo} ≥ ${goal.g}.</p>`;
+    else {
+      const pct = Math.max(0, Math.min(100, 100 * (p.elo - goal.s) / Math.max(1, goal.g - goal.s)));
+      body += `<div class="goalbar"><i style="width:${pct.toFixed(1)}%"></i></div>`;
+      if (avg <= 0.5) body += `<p class="legend">At your recent pace (${f1(avg)} ELO per match) the goal is not getting closer. Improve your win rate first.</p>`;
+      else { const n = Math.ceil(left / avg), days = Math.ceil(n / Math.max(perDay, 0.1)); body += `<p>${left} ELO to go · about ${n} matches at ${f1(avg)} ELO per match (last ${last.length} matches) · ~${days} days at ${f1(perDay)} matches/day</p>`; }
+    }
+  }
+  return '<h3>ELO goal</h3>' + body;
+}
+function setGoal() {
+  const p = D[0], v = +$('goal').value, key = 'goal:' + p.player_id;
+  try { if (v > 0) localStorage.setItem(key, JSON.stringify({ g: v, s: p.elo })); else localStorage.removeItem(key); } catch (e) {}
+  render();
+}
+
+// ---------- Порівняння періодів ----------
+let PCMP = 30;
+function periodCompare(p) {
+  const base = $('comp').checked ? p.matches.filter(m => /^de_/.test(m.map)) : p.matches, now = Date.now(), d = PCMP * 864e5;
+  const cur = base.filter(m => m.finished >= now - d), prev = base.filter(m => m.finished >= now - 2 * d && m.finished < now - d);
+  const sel = `<div class="tools"><select id="pcmp">${[7, 30, 90].map(x => `<option value="${x}"${x === PCMP ? ' selected' : ''}>Last ${x} days vs previous ${x}</option>`).join('')}</select></div>`;
+  if (!cur.length || !prev.length) return '<h3>Period comparison</h3>' + sel + '<p class="legend">Not enough matches in one of the periods.</p>';
+  const A = st(cur), B = st(prev), net = l => { const w = l.filter(m => m.delta != null); return w.length ? w.reduce((a, m) => a + m.delta, 0) : null; };
+  A.elo = net(cur); B.elo = net(prev);
+  const rows = [['Matches', 'n', 0, x => x], ['Win rate', 'wr', 1, x => f1(x) + '%'], ['K/D', 'kd', 1, f2], ['Avg kills', 'avg', 1, f2], ['ADR', 'adr', 1, f1], ['Headshot %', 'hs', 1, x => f1(x) + '%'], ['ELO net', 'elo', 1, x => (x > 0 ? '+' : '') + x]]
+    .filter(([, k]) => A[k] != null && B[k] != null);
+  const body = rows.map(([l, k, rank, fmt]) => {
+    const diff = A[k] - B[k], cls = !rank || !diff ? '' : diff > 0 ? 'best-cell' : 'worse';
+    return `<tr><td>${l}</td><td>${fmt(A[k])}</td><td>${fmt(B[k])}</td><td class="${cls}">${diff > 0 ? '+' : ''}${Number.isInteger(diff) ? diff : diff.toFixed(2)}</td></tr>`;
+  }).join('');
+  return '<h3>Period comparison</h3>' + sel + `<div class="scroll"><table><tr><th>Metric</th><th>Current</th><th>Previous</th><th>Change</th></tr>${body}</table></div>`;
+}
+
+// ---------- Найкращі напарники ----------
+function teamSection() {
+  return '<h3>Best teammates</h3><div class="tools"><select id="tper"><option value="25">Last 25 matches</option><option value="50" selected>Last 50 matches</option><option value="100">Last 100 matches</option></select>' +
+    '<button class="ghost" id="tgo" type="button">Analyze teammates</button><span id="tst" class="muted"></span></div><div id="tres"></div>';
+}
+async function runTeam() {
+  const p = D[0], list = p.matches.filter(m => m.id).slice(0, +$('tper').value);
+  if (!list.length) { $('tst').textContent = 'No match ids available.'; return; }
+  $('tgo').disabled = true;
+  const res = []; let err = '';
+  for (let i = 0; i < list.length; i += 20) {
+    $('tst').textContent = 'Analyzing ' + Math.min(i + 20, list.length) + ' / ' + list.length + '…';
+    try {
+      const r = await fetch('/api/matches?ids=' + list.slice(i, i + 20).map(m => m.id).join(',')), j = await r.json();
+      if (!r.ok) throw new Error(j.error || 'Request failed');
+      res.push(...j.results);
+    } catch (e) { err = e.message; break; }
+  }
+  $('tgo').disabled = false;
+  $('tst').textContent = err || 'Done: ' + res.length + ' matches';
+  if (res.length) teamTable(res);
+}
+function teamTable(res) {
+  const me = D[0].player_id, by = {}; let used = 0, won = 0;
+  res.forEach(r => {
+    if (!r.data) return;
+    const team = r.data.teams.find(t => t.players.some(q => q.id === me)); if (!team) return;
+    used++; won += team.win;
+    team.players.forEach(q => { if (q.id === me) return; const s = by[q.id] ||= { nick: q.nick, n: 0, w: 0, k: 0 }; s.n++; s.w += team.win; s.k += q.k; });
+  });
+  if (!used) { $('tres').innerHTML = '<p class="legend">No team data could be loaded for these matches.</p>'; return; }
+  const all = Object.values(by).filter(s => s.n >= 2), rows = all.sort((a, b) => b.n - a.n).slice(0, 15), overall = 100 * won / used;
+  const best = all.filter(s => s.n >= 4).sort((a, b) => b.w / b.n - a.w / a.n)[0];
+  if (!rows.length) { $('tres').innerHTML = '<p class="legend">Not enough repeat teammates in this period.</p>'; return; }
+  $('tres').innerHTML = (best ? `<p>Best partner: ${esc(best.nick)}, ${f1(100 * best.w / best.n)}% wins in ${best.n} games (overall ${f1(overall)}%).</p>` : '') +
+    '<div class="scroll"><table><tr><th>Player</th><th>Games together</th><th>Wins</th><th>Win rate</th><th>Avg kills</th></tr>' + rows.map(s => {
+      const wr = 100 * s.w / s.n;
+      return `<tr><td><a href="?u=${encodeURIComponent(s.nick)}">${esc(s.nick)}</a></td><td>${s.n}</td><td>${s.w}</td><td class="${wr >= overall + 5 ? 'best-cell' : wr <= overall - 5 ? 'worse' : ''}">${f1(wr)}%</td><td>${f2(s.k / s.n)}</td></tr>`;
+    }).join('') + '</table></div>';
+}
+
+// ---------- Таблиця друзів на головному екрані ----------
+const BR = {};
+async function drawFriendsTable() {
+  const l = getFriends().slice(0, 10);
+  $('ftitle').hidden = !l.length;
+  if (!l.length) { $('ftab').innerHTML = ''; return; }
+  const rows = await Promise.all(l.map(async n => {
+    if (!BR[n]) {
+      try { const r = await fetch('/api/brief?nick=' + encodeURIComponent(n)); BR[n] = r.ok ? await r.json() : { nickname: n, error: true }; }
+      catch (e) { BR[n] = { nickname: n, error: true }; }
+    }
+    return BR[n];
+  }));
+  rows.sort((a, b) => (b.elo || 0) - (a.elo || 0));
+  $('ftab').innerHTML = '<table><tr><th>Player</th><th>Level</th><th>ELO</th><th>K/D (last 20)</th><th>Win rate (last 20)</th></tr>' + rows.map(r =>
+    `<tr class="fav-row"><td>${r.avatar ? `<img src="${esc(r.avatar)}" alt="">` : ''}<a href="?u=${encodeURIComponent(r.nickname)}">${esc(r.nickname)}</a></td>` +
+    (r.error ? '<td colspan="4" class="muted">–</td>' : `<td>${badge(r.elo ? lvlInfo(r.elo).l : (+r.level || 1), 26)}</td><td>${r.elo || '–'}</td><td>${r.kd == null ? '–' : f2(r.kd)}</td><td>${r.wr == null ? '–' : f1(r.wr) + '%'}</td>`) + '</tr>').join('') + '</table>';
+}
+
 function single(p) {
   const ms = slice(p), s = st(ms), best = Math.max(...ms.map(m => m.kills));
   const dd = ms.filter(m => m.delta != null), net = dd.length ? dd.reduce((a, m) => a + m.delta, 0) : null;
@@ -776,7 +891,7 @@ function single(p) {
     ...(s.adr != null ? [['ADR', f1(s.adr)]] : []), ...(s.hs != null ? [['Headshot %', f1(s.hs) + '%']] : []),
     ['Kills', s.kills], ['Deaths', s.deaths], ['Assists', s.assists], ['Best match', best + ' kills'], ...(net != null ? [['ELO net', (net > 0 ? '+' : '') + net]] : [])];
   return head(p, ms.length) + `<div class="cards">${cards.map(([l, v]) => `<div class="card"><b>${esc(v)}</b><small>${l}</small></div>`).join('')}</div>` +
-    eloBlock(p) + coach(ms) + chart(ms) + records(ms) + badges(p) + calendar(p) + winloss(ms) + radar(ms) + maps(ms) + vetoSection() + tableSection() + '<p><button class="ghost" id="csv" type="button">Download CSV</button> <button class="ghost" id="card" type="button">Download stats card</button></p>';
+    eloBlock(p) + eloGoal(p) + coach(ms) + chart(ms) + records(ms) + badges(p) + calendar(p) + winloss(ms) + periodCompare(p) + radar(ms) + maps(ms) + vetoSection() + teamSection() + tableSection() + '<p><button class="ghost" id="csv" type="button">Download CSV</button> <button class="ghost" id="card" type="button">Download stats card</button></p>';
 }
 
 function compare(p, q) {
@@ -855,10 +970,19 @@ const UK = {
   'Bans are made by the team captain, so your team\'s bans are not always your own.': 'Бани робить капітан команди, тож бани команди не завжди твої власні.', 'The veto history was empty for these matches.': 'Історія вето для цих матчів порожня.',
   'Too many deaths': 'Забагато смертей', 'Strong K/D': 'Сильний K/D', 'Low damage per round': 'Низький урон за раунд', 'High damage output': 'Високий урон', 'Crosshair placement': 'Розташування прицілу', 'Good aim': 'Хороше прицілювання', 'You fall apart in lost games': 'Ти «розсипаєшся» в програних матчах',
   'Recent dip': 'Нещодавній спад', 'You are on the rise': 'Ти на підйомі', 'Tilt after a loss': 'Тільт після поразки', 'Balanced profile': 'Збалансований профіль', 'No clear weak spots found. Keep playing and check back after more matches.': 'Явних слабких місць не знайдено. Грай далі й перевір ще раз після більшої кількості матчів.',
+  'ELO goal': 'Ціль по ELO', 'Target ELO': 'Цільове ELO', 'Set goal': 'Поставити ціль', 'Best teammates': 'Найкращі напарники', 'Analyze teammates': 'Аналізувати напарників', 'Friends': 'Друзі',
+  'Period comparison': 'Порівняння періодів', 'Current': 'Поточний', 'Previous': 'Попередній', 'Change': 'Зміна', 'Metric': 'Показник', 'Games together': 'Ігор разом', 'Wins': 'Перемоги', 'Level': 'Рівень',
+  'Not enough matches in one of the periods.': 'В одному з періодів замало матчів.', 'No match ids available.': 'Немає ідентифікаторів матчів.', 'K/D (last 20)': 'K/D (останні 20)', 'Win rate (last 20)': 'Відсоток перемог (останні 20)',
+  'No team data could be loaded for these matches.': 'Для цих матчів не вдалося завантажити склад команд.', 'Not enough repeat teammates in this period.': 'За цей період замало напарників, з якими ти грав кілька разів.',
   'Import ELO history manually': 'Імпорт історії ELO вручну', 'Click for match details': 'Натисни, щоб побачити деталі матчу',
 };
 const TOD = { 'at night (00-06)': 'вночі (00–06)', 'in the morning (06-12)': 'вранці (06–12)', 'in the afternoon (12-18)': 'вдень (12–18)', 'in the evening (18-24)': 'ввечері (18–24)' };
 const UKP = [
+  [/^Next level \((\d+)\)$/, m => `Наступний рівень (${m[1]})`], [/^Goal reached: (\d+) ≥ (\d+)\.$/, m => `Ціль досягнуто: ${m[1]} ≥ ${m[2]}.`],
+  [/^At your recent pace \(([\d.-]+) ELO per match\) the goal is not getting closer\. Improve your win rate first\.$/, m => `При твоєму темпі (${m[1]} ELO за матч) ціль не наближається. Спершу підніми відсоток перемог.`],
+  [/^(\d+) ELO to go · about (\d+) matches at ([\d.]+) ELO per match \(last (\d+) matches\) · ~(\d+) days at ([\d.]+) matches\/day$/, m => `Лишилось ${m[1]} ELO · приблизно ${m[2]} матчів при ${m[3]} ELO за матч (останні ${m[4]} матчів) · ~${m[5]} днів при ${m[6]} матчів/день`],
+  [/^Last (\d+) days vs previous (\d+)$/, m => `Останні ${m[1]} днів проти попередніх ${m[2]}`],
+  [/^Best partner: (.+), ([\d.]+)% wins in (\d+) games \(overall ([\d.]+)%\)\.$/, m => `Найкращий напарник: ${m[1]}, ${m[2]}% перемог у ${m[3]} іграх (загалом ${m[4]}%).`],
   [/^Level (\d+)$/, m => `Рівень ${m[1]}`], [/^(\d+) of (\d+) matches$/, m => `${m[1]} з ${m[2]} матчів`], [/^(\d+) matches$/, m => `${m[1]} матчів`],
   [/^(\d+) ELO to level (\d+)$/, m => `${m[1]} ELO до рівня ${m[2]}`], [/^★ Save (.+)$/, m => `★ Зберегти ${m[1]}`],
   [/^(\d+) kills$/, m => `${m[1]} вбивств`], [/^(\d+) assists$/, m => `${m[1]} асистів`], [/^(\d+) wins?$/, m => `${m[1]} перемог`], [/^(\d+) loss(?:es)?$/, m => `${m[1]} поразок`], [/^best (\d+)$/, m => `рекорд ${m[1]}`],

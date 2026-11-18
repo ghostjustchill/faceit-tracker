@@ -323,6 +323,61 @@ def fetch_match(mid):
     return out
 
 
+recent_cache = {}
+
+
+def fetch_recent(nick):
+    """Гравець + його останні 30 матчів (легкий запит для друзів та оверлею)."""
+    key = nick.lower()
+    hit = recent_cache.get(key)
+    if hit and time.time() - hit[0] < 60:
+        return hit[1]
+    player = api_get("/players", {"nickname": nick})
+    cs2 = (player.get("games") or {}).get(GAME) or {}
+    data = api_get("/players/%s/games/%s/stats" % (player["player_id"], GAME), {"limit": 30, "offset": 0})
+    ms = []
+    for it in data.get("items") or []:
+        st = it.get("stats") or {}
+        ms.append({"win": to_int(st.get("Result")) == 1, "k": to_int(st.get("Kills")), "d": to_int(st.get("Deaths")),
+                   "finished": to_int(st.get("Match Finished At"))})
+    out = {"nickname": player.get("nickname", nick), "avatar": player.get("avatar", ""), "elo": cs2.get("faceit_elo"),
+           "level": cs2.get("skill_level"), "matches": ms}
+    if len(recent_cache) >= 500:
+        recent_cache.pop(min(recent_cache, key=lambda k: recent_cache[k][0]))
+    recent_cache[key] = (time.time(), out)
+    return out
+
+
+def kd_of(ms):
+    d = sum(m["d"] for m in ms)
+    k = sum(m["k"] for m in ms)
+    return round(k / d if d else k, 2) if ms else None
+
+
+def brief(nick):
+    r = fetch_recent(nick)
+    ms = r["matches"][:20]
+    return {"nickname": r["nickname"], "avatar": r["avatar"], "elo": r["elo"], "level": r["level"], "n": len(ms),
+            "kd": kd_of(ms), "wr": round(100 * sum(m["win"] for m in ms) / len(ms), 1) if ms else None}
+
+
+def overlay(nick, since):
+    r = fetch_recent(nick)
+    sess = [m for m in r["matches"] if m["finished"] >= since]
+    return {"nickname": r["nickname"], "elo": r["elo"], "level": r["level"], "wins": sum(m["win"] for m in sess),
+            "losses": sum(not m["win"] for m in sess), "kd": kd_of(sess), "last5": [m["win"] for m in r["matches"][:5]]}
+
+
+def matches_batch(ids):
+    def one(i):
+        try:
+            return {"id": i, "data": fetch_match(i)}
+        except ApiError as e:
+            return {"id": i, "error": str(e)}
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        return list(pool.map(one, ids))
+
+
 class Handler(BaseHTTPRequestHandler):
     def send_bytes(self, status, body, ctype):
         self.send_response(status)
@@ -333,6 +388,12 @@ class Handler(BaseHTTPRequestHandler):
 
     def send_json(self, status, obj):
         self.send_bytes(status, json.dumps(obj).encode("utf-8"), "application/json; charset=utf-8")
+
+    def api_call(self, fn):
+        try:
+            self.send_json(200, fn())
+        except ApiError as e:
+            self.send_json(e.status if e.status in (401, 403, 404, 429) else 502, {"error": "Player not found" if e.status == 404 else str(e)})
 
     def do_HEAD(self):
         # Render і сервіси моніторингу перевіряють сайт запитом HEAD
@@ -345,7 +406,7 @@ class Handler(BaseHTTPRequestHandler):
         ip = client_ip(self)
 
         if url.path.startswith("/api/"):
-            cost = 4 if url.path == "/api/vetoes" else 1
+            cost = 4 if url.path in ("/api/vetoes", "/api/matches") else 1
             if not allowed(ip, cost):
                 metrics["rate_limited"] += 1
                 self.send_json(429, {"error": "Too many requests, wait a minute"})
@@ -366,6 +427,27 @@ class Handler(BaseHTTPRequestHandler):
                                  "note": "Counters reset when the server restarts"})
             return
 
+        if url.path in ("/api/brief", "/api/overlay"):
+            q = urllib.parse.parse_qs(url.query)
+            nick = (q.get("nick", [""])[0]).strip()
+            if not re.fullmatch(r"[\w.\-]{2,32}", nick):
+                self.send_json(400, {"error": "Bad request"})
+                return
+            if url.path == "/api/brief":
+                self.api_call(lambda: brief(nick))
+            else:
+                since = to_int(q.get("since", ["0"])[0])
+                self.api_call(lambda: overlay(nick, since))
+            return
+
+        if url.path == "/api/matches":
+            ids = [i for i in urllib.parse.parse_qs(url.query).get("ids", [""])[0].split(",") if i][:20]
+            if not ids or not all(re.fullmatch(r"[0-9A-Za-z-]{10,80}", i) for i in ids):
+                self.send_json(400, {"error": "Bad request"})
+                return
+            self.send_json(200, {"results": matches_batch(ids)})
+            return
+
         if url.path == "/api/match":
             mid = urllib.parse.parse_qs(url.query).get("id", [""])[0]
             if not re.fullmatch(r"[0-9A-Za-z-]{10,80}", mid):
@@ -379,7 +461,8 @@ class Handler(BaseHTTPRequestHandler):
 
         static = {"/robots.txt": ("robots.txt", "text/plain; charset=utf-8"),
                   "/sitemap.xml": ("sitemap.xml", "application/xml; charset=utf-8"),
-                  "/og.png": ("og.png", "image/png")}
+                  "/og.png": ("og.png", "image/png"),
+                  "/overlay": ("overlay.html", "text/html; charset=utf-8")}
         if url.path in static:
             name, ctype = static[url.path]
             try:
